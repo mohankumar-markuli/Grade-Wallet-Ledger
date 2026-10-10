@@ -25,8 +25,10 @@ describe('Top-up PostgreSQL integration', () => {
     let idempotencyKey;
 
     beforeAll(async () => {
-        // This test suite must use wallet_test_db.
-        const databaseResult = await pool.query('SELECT current_database() AS name');
+        // Never run these integration tests against the development database.
+        const databaseResult = await pool.query(
+            'SELECT current_database() AS name'
+        );
 
         if (databaseResult.rows[0].name !== 'wallet_test_db') {
             throw new Error(
@@ -74,7 +76,7 @@ describe('Top-up PostgreSQL integration', () => {
         walletId = String(wallet.rows[0].id);
         idempotencyKey = `integration-${crypto.randomUUID()}`;
 
-        // Each test run starts from a known state.
+        // Start this test fixture from a known state.
         await pool.query(
             'UPDATE accounts SET balance_paise = 0 WHERE id = $1',
             [walletId]
@@ -88,10 +90,11 @@ describe('Top-up PostgreSQL integration', () => {
 
     afterAll(async () => {
         try {
-            // Remove any test-only trigger if a previous run left one behind.
+            // Remove any test-only trigger left behind by a previous run.
             await pool.query(
                 'DROP TRIGGER IF EXISTS test_force_wallet_update_failure ON accounts'
             );
+
             await pool.query(
                 'DROP FUNCTION IF EXISTS test_fail_wallet_update()'
             );
@@ -137,7 +140,8 @@ describe('Top-up PostgreSQL integration', () => {
                 );
 
                 await pool.query(
-                    'DELETE FROM transfers WHERE from_account_id = $1 OR to_account_id = $1',
+                    `DELETE FROM transfers
+                     WHERE from_account_id = $1 OR to_account_id = $1`,
                     [walletId]
                 );
 
@@ -154,12 +158,15 @@ describe('Top-up PostgreSQL integration', () => {
                 );
             }
 
+            // Restore the funding account's original balance.
             if (
                 fundingAccountId !== undefined &&
                 originalFundingBalance !== undefined
             ) {
                 await pool.query(
-                    'UPDATE accounts SET balance_paise = $1::bigint WHERE id = $2',
+                    `UPDATE accounts
+                     SET balance_paise = $1::bigint
+                     WHERE id = $2`,
                     [originalFundingBalance.toString(), fundingAccountId]
                 );
             }
@@ -171,6 +178,7 @@ describe('Top-up PostgreSQL integration', () => {
     test('creates a balanced top-up and replays it idempotently', async () => {
         const first = await topUpWallet({
             walletId,
+            userId,
             amountPaise: '5000',
             idempotencyKey,
         });
@@ -207,16 +215,21 @@ describe('Top-up PostgreSQL integration', () => {
         );
 
         expect(ledger.rows).toHaveLength(2);
-        expect(ledger.rows.map((row) => row.entry_type).sort()).toEqual([
-            'credit',
-            'debit',
-        ]);
+
         expect(
-            ledger.rows.every((row) => BigInt(row.amount_paise) === 5000n)
+            ledger.rows.map((row) => row.entry_type).sort()
+        ).toEqual(['credit', 'debit']);
+
+        expect(
+            ledger.rows.every(
+                (row) => BigInt(row.amount_paise) === 5000n
+            )
         ).toBe(true);
 
+        // Repeating the same request must return the original result.
         const replay = await topUpWallet({
             walletId,
+            userId,
             amountPaise: '5000',
             idempotencyKey,
         });
@@ -225,9 +238,11 @@ describe('Top-up PostgreSQL integration', () => {
         expect(replay.replayed).toBe(true);
         expect(String(replay.body.data.transfer.id)).toBe(transferId);
 
+        // Reusing the key for a different amount must be rejected.
         await expect(
             topUpWallet({
                 walletId,
+                userId,
                 amountPaise: '6000',
                 idempotencyKey,
             })
@@ -254,6 +269,7 @@ describe('Top-up PostgreSQL integration', () => {
             'SELECT balance_paise FROM accounts WHERE id = $1',
             [walletId]
         );
+
         const balanceBefore = BigInt(before.rows[0].balance_paise);
 
         await pool.query(`
@@ -282,6 +298,7 @@ describe('Top-up PostgreSQL integration', () => {
             await expect(
                 topUpWallet({
                     walletId,
+                    userId,
                     amountPaise: '7000',
                     idempotencyKey: key,
                 })
@@ -290,6 +307,7 @@ describe('Top-up PostgreSQL integration', () => {
             await pool.query(
                 'DROP TRIGGER IF EXISTS test_force_wallet_update_failure ON accounts'
             );
+
             await pool.query(
                 'DROP FUNCTION IF EXISTS test_fail_wallet_update()'
             );

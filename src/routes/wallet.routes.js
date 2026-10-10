@@ -4,6 +4,7 @@ const {
     createWallet,
     getWalletBalance,
 } = require('../repositories/wallet.repository');
+
 const { topUpWallet } = require('../repositories/topup.repository');
 const {
     transferBetweenWallets,
@@ -101,6 +102,7 @@ router.post('/:id/top-up', async (req, res, next) => {
 
         const result = await topUpWallet({
             walletId,
+            userId: req.user.id,
             amountPaise: req.body?.amountPaise,
             idempotencyKey: req.get('Idempotency-Key'),
         });

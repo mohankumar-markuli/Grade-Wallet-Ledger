@@ -1,7 +1,5 @@
-
 const crypto = require('node:crypto');
 const pool = require('../config/db');
-
 
 const MAX_BIGINT = 9223372036854775807n;
 
@@ -16,17 +14,26 @@ function normalizeAmount(amountPaise) {
     ) {
         amount = String(amountPaise);
     } else {
-        throw Object.assign(new Error('amountPaise must be a positive integer.'), {
-            status: 400,
-            code: 'VALIDATION_ERROR',
-        });
+        throw Object.assign(
+            new Error('amountPaise must be a positive integer.'),
+            {
+                status: 400,
+                code: 'VALIDATION_ERROR',
+            }
+        );
     }
 
-    if (!/^[1-9]\d*$/.test(amount) || BigInt(amount) > MAX_BIGINT) {
-        throw Object.assign(new Error('amountPaise must be a valid positive amount.'), {
-            status: 400,
-            code: 'VALIDATION_ERROR',
-        });
+    if (
+        !/^[1-9]\d*$/.test(amount) ||
+        BigInt(amount) > MAX_BIGINT
+    ) {
+        throw Object.assign(
+            new Error('amountPaise must be a valid positive amount.'),
+            {
+                status: 400,
+                code: 'VALIDATION_ERROR',
+            }
+        );
     }
 
     return amount;
@@ -38,16 +45,24 @@ function normalizeIdempotencyKey(key) {
         key.trim().length === 0 ||
         key.length > 255
     ) {
-        throw Object.assign(new Error('A valid Idempotency-Key header is required.'), {
-            status: 400,
-            code: 'IDEMPOTENCY_KEY_REQUIRED',
-        });
+        throw Object.assign(
+            new Error('A valid Idempotency-Key header is required.'),
+            {
+                status: 400,
+                code: 'IDEMPOTENCY_KEY_REQUIRED',
+            }
+        );
     }
 
     return key;
 }
 
-async function topUpWallet({ walletId, amountPaise, idempotencyKey }) {
+async function topUpWallet({
+    walletId,
+    userId,
+    amountPaise,
+    idempotencyKey,
+}) {
     const amount = normalizeAmount(amountPaise);
     const key = normalizeIdempotencyKey(idempotencyKey);
     const client = await pool.connect();
@@ -55,12 +70,15 @@ async function topUpWallet({ walletId, amountPaise, idempotencyKey }) {
     try {
         await client.query('BEGIN');
 
-        // Find the wallet owner. Lock both accounts in ID order below.
+        // Verify ownership and lock the authenticated user's wallet.
         const walletResult = await client.query(
             `SELECT id, user_id, currency, balance_paise, status
              FROM accounts
-             WHERE id = $1 AND account_type = 'wallet'`,
-            [walletId]
+             WHERE id = $1
+               AND user_id = $2
+               AND account_type = 'wallet'
+             FOR UPDATE`,
+            [walletId, userId]
         );
 
         const wallet = walletResult.rows[0];
@@ -74,15 +92,16 @@ async function topUpWallet({ walletId, amountPaise, idempotencyKey }) {
 
         const requestHash = crypto
             .createHash('sha256')
-            .update(JSON.stringify({
-                operation: 'wallet-top-up',
-                walletId: String(wallet.id),
-                amountPaise: amount,
-            }))
+            .update(
+                JSON.stringify({
+                    operation: 'wallet-top-up',
+                    walletId: String(wallet.id),
+                    amountPaise: amount,
+                })
+            )
             .digest('hex');
 
-        // Insert the idempotency record first. A concurrent duplicate
-        // waits for the first transaction and then sees its saved response.
+        // Register the idempotency key for this wallet owner's user ID.
         const keyResult = await client.query(
             `INSERT INTO idempotency_keys
                 (user_id, idempotency_key, request_hash)
@@ -96,17 +115,26 @@ async function topUpWallet({ walletId, amountPaise, idempotencyKey }) {
             const existingResult = await client.query(
                 `SELECT request_hash, response_status, response_body
                  FROM idempotency_keys
-                 WHERE user_id = $1 AND idempotency_key = $2
+                 WHERE user_id = $1
+                   AND idempotency_key = $2
                  FOR UPDATE`,
                 [wallet.user_id, key]
             );
 
             const existing = existingResult.rows[0];
 
-            if (!existing || existing.request_hash !== requestHash) {
+            if (
+                !existing ||
+                existing.request_hash !== requestHash
+            ) {
                 throw Object.assign(
-                    new Error('This Idempotency-Key was already used for a different request.'),
-                    { status: 409, code: 'IDEMPOTENCY_KEY_REUSED' }
+                    new Error(
+                        'This Idempotency-Key was already used for a different request.'
+                    ),
+                    {
+                        status: 409,
+                        code: 'IDEMPOTENCY_KEY_REUSED',
+                    }
                 );
             }
 
@@ -115,8 +143,13 @@ async function topUpWallet({ walletId, amountPaise, idempotencyKey }) {
                 existing.response_body === null
             ) {
                 throw Object.assign(
-                    new Error('The original request has no saved response. Retry shortly.'),
-                    { status: 409, code: 'IDEMPOTENCY_REQUEST_INCOMPLETE' }
+                    new Error(
+                        'The original request has no saved response. Retry shortly.'
+                    ),
+                    {
+                        status: 409,
+                        code: 'IDEMPOTENCY_REQUEST_INCOMPLETE',
+                    }
                 );
             }
 
@@ -129,8 +162,6 @@ async function topUpWallet({ walletId, amountPaise, idempotencyKey }) {
             };
         }
 
-        // Lock wallet and funding account in a consistent order.
-
         // Find the active external-funding account dynamically.
         const fundingResult = await client.query(
             `SELECT id
@@ -142,15 +173,23 @@ async function topUpWallet({ walletId, amountPaise, idempotencyKey }) {
         );
 
         if (fundingResult.rowCount !== 1) {
-            throw new Error('Active external-funding account is not configured.');
+            throw new Error(
+                'Active external-funding account is not configured.'
+            );
         }
 
         const fundingAccountId = String(fundingResult.rows[0].id);
 
-        // Lock both accounts in a consistent order.
-        const accountIds = [String(wallet.id), fundingAccountId].sort(
-            (a, b) => (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0)
-        );
+        // Lock both accounts in a consistent ID order.
+        const accountIds = [
+            String(wallet.id),
+            fundingAccountId,
+        ].sort((a, b) => {
+            const left = BigInt(a);
+            const right = BigInt(b);
+
+            return left < right ? -1 : left > right ? 1 : 0;
+        });
 
         const lockedResult = await client.query(
             `SELECT id, account_type, currency, balance_paise, status
@@ -174,27 +213,40 @@ async function topUpWallet({ walletId, amountPaise, idempotencyKey }) {
             !funding ||
             funding.account_type !== 'external_funding'
         ) {
-            throw new Error('Wallet or external-funding account is not configured correctly.');
+            throw new Error(
+                'Wallet or external-funding account is not configured correctly.'
+            );
         }
 
-        if (lockedWallet.status !== 'active' || funding.status !== 'active') {
-            throw Object.assign(new Error('Wallet or funding account is not active.'), {
-                status: 409,
-                code: 'ACCOUNT_NOT_ACTIVE',
-            });
+        if (
+            lockedWallet.status !== 'active' ||
+            funding.status !== 'active'
+        ) {
+            throw Object.assign(
+                new Error('Wallet or funding account is not active.'),
+                {
+                    status: 409,
+                    code: 'ACCOUNT_NOT_ACTIVE',
+                }
+            );
         }
 
-        if (lockedWallet.currency !== 'INR' || funding.currency !== 'INR') {
+        if (
+            lockedWallet.currency !== 'INR' ||
+            funding.currency !== 'INR'
+        ) {
             throw new Error('Unsupported account currency.');
         }
 
+        // Record the completed top-up transfer.
         const transferResult = await client.query(
             `INSERT INTO transfers
                 (from_account_id, to_account_id, amount_paise,
                  currency, status, description, completed_at)
              VALUES ($1, $2, $3, 'INR', 'completed', $4, NOW())
              RETURNING id, from_account_id, to_account_id,
-                       amount_paise, currency, status, created_at, completed_at`,
+                       amount_paise, currency, status, created_at,
+                       completed_at`,
             [
                 fundingAccountId,
                 lockedWallet.id,
@@ -205,15 +257,22 @@ async function topUpWallet({ walletId, amountPaise, idempotencyKey }) {
 
         const transfer = transferResult.rows[0];
 
+        // Record balanced debit and credit ledger entries.
         await client.query(
             `INSERT INTO ledger_entries
                 (transfer_id, account_id, entry_type, amount_paise)
              VALUES
                 ($1, $2, 'debit', $3),
                 ($1, $4, 'credit', $3)`,
-            [transfer.id, fundingAccountId, amount, lockedWallet.id]
+            [
+                transfer.id,
+                fundingAccountId,
+                amount,
+                lockedWallet.id,
+            ]
         );
 
+        // Debit the external funding account.
         await client.query(
             `UPDATE accounts
              SET balance_paise = balance_paise - $1::bigint
@@ -221,13 +280,26 @@ async function topUpWallet({ walletId, amountPaise, idempotencyKey }) {
             [amount, fundingAccountId]
         );
 
+        // Credit the authenticated user's wallet.
         const updatedWalletResult = await client.query(
             `UPDATE accounts
              SET balance_paise = balance_paise + $1::bigint
              WHERE id = $2
+               AND user_id = $3
+               AND account_type = 'wallet'
              RETURNING id, user_id, currency, balance_paise, status`,
-            [amount, lockedWallet.id]
+            [amount, lockedWallet.id, userId]
         );
+
+        if (updatedWalletResult.rowCount !== 1) {
+            throw Object.assign(
+                new Error('Wallet ownership validation failed.'),
+                {
+                    status: 404,
+                    code: 'WALLET_NOT_FOUND',
+                }
+            );
+        }
 
         const responseBody = {
             data: {
@@ -236,19 +308,25 @@ async function topUpWallet({ walletId, amountPaise, idempotencyKey }) {
             },
         };
 
+        // Audit the completed transfer.
         await client.query(
             `INSERT INTO transfer_status_audit
                 (transfer_id, old_status, new_status, reason)
              VALUES ($1, NULL, 'completed', $2)`,
-            [transfer.id, 'Simulated external wallet top-up']
+            [
+                transfer.id,
+                'Simulated external wallet top-up',
+            ]
         );
 
+        // Save the response for safe idempotent retries.
         await client.query(
             `UPDATE idempotency_keys
              SET response_status = 201,
                  response_body = $1::jsonb,
                  transfer_id = $2
-             WHERE user_id = $3 AND idempotency_key = $4`,
+             WHERE user_id = $3
+               AND idempotency_key = $4`,
             [
                 JSON.stringify(responseBody),
                 transfer.id,
@@ -259,7 +337,11 @@ async function topUpWallet({ walletId, amountPaise, idempotencyKey }) {
 
         await client.query('COMMIT');
 
-        return { status: 201, body: responseBody, replayed: false };
+        return {
+            status: 201,
+            body: responseBody,
+            replayed: false,
+        };
     } catch (error) {
         await client.query('ROLLBACK');
         throw error;
