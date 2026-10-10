@@ -1,11 +1,12 @@
+
 require('dotenv').config();
 
+const { validateEnv } = require('./config/env');
 const app = require('./app');
 
-const PORT = process.env.PORT || 3000;
-
-const server = app.listen(PORT, () => {
-    console.log(`Grade Wallet Ledger API listening on port ${PORT}`);
+const config = validateEnv();
+const server = app.listen(config.port, () => {
+    console.log(`Grade Wallet Ledger API listening on port ${config.port}`);
 });
 
 function shutdown() {

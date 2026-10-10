@@ -1,8 +1,11 @@
 
 const { Pool } = require('pg');
+const { validateEnv } = require('./env');
+
+const config = validateEnv();
 
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: config.databaseUrl,
     connectionTimeoutMillis: 5000,
     idleTimeoutMillis: 30000,
     max: 10,
