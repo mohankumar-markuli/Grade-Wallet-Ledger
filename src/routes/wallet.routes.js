@@ -1,6 +1,7 @@
 const express = require('express');
 const { createWallet, getWalletBalance } = require('../repositories/wallet.repository');
 const { topUpWallet } = require('../repositories/topup.repository');
+const { transferBetweenWallets } = require('../repositories/transfer.repository');
 
 const router = express.Router();
 
@@ -105,5 +106,57 @@ router.post('/:id/top-up', async (req, res, next) => {
         return next(error);
     }
 });
+
+
+router.post('/:id/transfer', async (req, res, next) => {
+    try {
+        const fromWalletId = req.params.id;
+
+        if (!/^[1-9]\d*$/.test(fromWalletId)) {
+            return res.status(400).json({
+                error: {
+                    code: 'VALIDATION_ERROR',
+                    message: 'A valid source wallet ID is required.',
+                },
+            });
+        }
+
+        const toWalletId = req.body?.toWalletId;
+
+        if (
+            toWalletId === undefined ||
+            toWalletId === null ||
+            !/^[1-9]\d*$/.test(String(toWalletId))
+        ) {
+            return res.status(400).json({
+                error: {
+                    code: 'VALIDATION_ERROR',
+                    message: 'A valid destination wallet ID is required.',
+                },
+            });
+        }
+
+        const result = await transferBetweenWallets({
+            fromWalletId,
+            toWalletId: String(toWalletId),
+            amountPaise: req.body?.amountPaise,
+            idempotencyKey: req.get('Idempotency-Key'),
+        });
+
+        return res.status(result.status).json(result.body);
+    } catch (error) {
+        if (error.status && error.code) {
+            return res.status(error.status).json({
+                error: {
+                    code: error.code,
+                    message: error.message,
+                },
+            });
+        }
+
+        return next(error);
+    }
+});
+
 
 module.exports = router;
