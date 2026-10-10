@@ -23,6 +23,7 @@ describe('POST /users', () => {
 
         const response = await request(app)
             .post('/users')
+            .set('Idempotency-Key', '03030303-0303-4303-8303-030303030303')
             .send({
                 email: ' TEST@EXAMPLE.COM ',
                 fullName: ' Test User ',
@@ -37,12 +38,14 @@ describe('POST /users', () => {
             email: 'test@example.com',
             fullName: 'Test User',
             password: 'correct-horse-battery-staple',
+            idempotencyKey: '03030303-0303-4303-8303-030303030303'
         });
     });
 
     test('rejects missing required fields with HTTP 400', async () => {
         const response = await request(app)
             .post('/users')
+            .set('Idempotency-Key', '05050505-0505-4505-8505-050505050505')
             .send({ email: 'test@example.com' });
 
         expect(response.status).toBe(400);
@@ -53,6 +56,7 @@ describe('POST /users', () => {
     test('rejects a password that is too short', async () => {
         const response = await request(app)
             .post('/users')
+            .set('Idempotency-Key', '04040404-0404-4404-8404-040404040404')
             .send({
                 email: 'test@example.com',
                 fullName: 'Test User',
@@ -71,6 +75,7 @@ describe('POST /users', () => {
 
         const response = await request(app)
             .post('/users')
+            .set('Idempotency-Key', '06060606-0606-4606-8606-060606060606')
             .send({
                 email: 'test@example.com',
                 fullName: 'Test User',

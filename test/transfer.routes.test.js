@@ -73,7 +73,7 @@ describe('POST /wallets/:id/transfer', () => {
         const response = await request(app)
             .post('/wallets/1/transfer')
             .set('Authorization', `Bearer ${createToken('10')}`)
-            .set('Idempotency-Key', 'route-transfer-001')
+            .set('Idempotency-Key', '20000000-0000-4000-8000-000000000001')
             .send({
                 toWalletId: '2',
                 amountPaise: '1000',
@@ -92,7 +92,7 @@ describe('POST /wallets/:id/transfer', () => {
             toWalletId: '2',
             userId: '10',
             amountPaise: '1000',
-            idempotencyKey: 'route-transfer-001',
+            idempotencyKey: '20000000-0000-4000-8000-000000000001',
         });
     });
 
@@ -138,7 +138,7 @@ describe('POST /wallets/:id/transfer', () => {
         const response = await request(app)
             .post('/wallets/1/transfer')
             .set('Authorization', `Bearer ${createToken('10')}`)
-            .set('Idempotency-Key', 'route-transfer-002')
+            .set('Idempotency-Key', '20000000-0000-4000-8000-000000000002')
             .send({
                 toWalletId: '2',
                 amountPaise: '1000',
@@ -154,6 +154,7 @@ describe('POST /wallets/:id/transfer', () => {
         const response = await request(app)
             .post('/wallets/1/transfer')
             .set('Authorization', `Bearer ${createToken('10')}`)
+            .set('Idempotency-Key', '20000000-0000-4000-8000-000000000003')
             .send({
                 toWalletId: '2',
                 amountPaise: '1000',

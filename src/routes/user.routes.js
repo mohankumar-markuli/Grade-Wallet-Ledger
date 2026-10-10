@@ -1,10 +1,12 @@
-
 const express = require('express');
 const { createUser } = require('../repositories/user.repository');
+const {
+    requireIdempotencyKey
+} = require('../middleware/require-idempotency-key.middleware');
 
 const router = express.Router();
 
-router.post('/', async (req, res, next) => {
+router.post('/', requireIdempotencyKey, async (req, res, next) => {
     try {
         const email =
             typeof req.body?.email === 'string'
@@ -25,8 +27,8 @@ router.post('/', async (req, res, next) => {
             return res.status(400).json({
                 error: {
                     code: 'VALIDATION_ERROR',
-                    message: 'Email, fullName, and password are required.',
-                },
+                    message: 'Email, fullName, and password are required.'
+                }
             });
         }
 
@@ -34,8 +36,8 @@ router.post('/', async (req, res, next) => {
             return res.status(400).json({
                 error: {
                     code: 'VALIDATION_ERROR',
-                    message: 'Email or fullName exceeds the allowed length.',
-                },
+                    message: 'Email or fullName exceeds the allowed length.'
+                }
             });
         }
 
@@ -43,21 +45,32 @@ router.post('/', async (req, res, next) => {
             return res.status(400).json({
                 error: {
                     code: 'VALIDATION_ERROR',
-                    message: 'Password must be at least 12 characters and no more than 72 UTF-8 bytes.',
-                },
+                    message: 'Password must be at least 12 characters and no more than 72 UTF-8 bytes.'
+                }
             });
         }
 
-        const user = await createUser({ email, fullName, password });
+        const user = await createUser({
+            email,
+            fullName,
+            password,
+            idempotencyKey: req.idempotencyKey
+        });
 
         return res.status(201).json({ data: user });
     } catch (error) {
+        if (error.status && error.code) {
+            return res.status(error.status).json({
+                error: { code: error.code, message: error.message }
+            });
+        }
+
         if (error.code === '23505') {
             return res.status(409).json({
                 error: {
                     code: 'EMAIL_ALREADY_EXISTS',
-                    message: 'A user with this email already exists.',
-                },
+                    message: 'A user with this email already exists.'
+                }
             });
         }
 

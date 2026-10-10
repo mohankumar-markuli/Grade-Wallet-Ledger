@@ -56,6 +56,7 @@ describe('Wallet routes', () => {
             const response = await request(app)
                 .post('/wallets')
                 .set('Authorization', `Bearer ${createToken('10')}`)
+                .set('Idempotency-Key', '01010101-0101-4101-8101-010101010101')
                 .send({ userId: '999' });
 
             expect(response.status).toBe(201);
@@ -64,7 +65,10 @@ describe('Wallet routes', () => {
             expect(response.body.data.balance_paise).toBe('0');
 
             // The request body cannot choose the wallet owner.
-            expect(createWallet).toHaveBeenCalledWith({ userId: '10' });
+            expect(createWallet).toHaveBeenCalledWith({
+                userId: '10',
+                idempotencyKey: '01010101-0101-4101-8101-010101010101'
+            });
         });
 
         test('rejects a request without authentication', async () => {
@@ -84,6 +88,7 @@ describe('Wallet routes', () => {
             const response = await request(app)
                 .post('/wallets')
                 .set('Authorization', `Bearer ${createToken('999999')}`)
+                .set('Idempotency-Key', '02020202-0202-4202-8202-020202020202')
                 .send({});
 
             expect(response.status).toBe(404);

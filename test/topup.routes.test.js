@@ -73,7 +73,7 @@ describe('POST /wallets/:id/top-up', () => {
         const response = await request(app)
             .post('/wallets/1/top-up')
             .set('Authorization', `Bearer ${createToken('10')}`)
-            .set('Idempotency-Key', 'topup-test-001')
+            .set('Idempotency-Key', '10000000-0000-4000-8000-000000000001')
             .send({ amountPaise: '5000' });
 
         expect(response.status).toBe(201);
@@ -88,7 +88,7 @@ describe('POST /wallets/:id/top-up', () => {
             walletId: '1',
             userId: '10',
             amountPaise: '5000',
-            idempotencyKey: 'topup-test-001',
+            idempotencyKey: '10000000-0000-4000-8000-000000000001',
         });
 
     });
@@ -97,7 +97,7 @@ describe('POST /wallets/:id/top-up', () => {
         const response = await request(app)
             .post('/wallets/abc/top-up')
             .set('Authorization', `Bearer ${createToken('10')}`)
-            .set('Idempotency-Key', 'topup-test-002')
+            .set('Idempotency-Key', '10000000-0000-4000-8000-000000000002')
             .send({ amountPaise: '5000' });
 
         expect(response.status).toBe(400);
@@ -120,7 +120,7 @@ describe('POST /wallets/:id/top-up', () => {
         const response = await request(app)
             .post('/wallets/1/top-up')
             .set('Authorization', `Bearer ${createToken('10')}`)
-            .set('Idempotency-Key', 'topup-test-003')
+            .set('Idempotency-Key', '10000000-0000-4000-8000-000000000003')
             .send({ amountPaise: '0' });
 
         expect(response.status).toBe(400);
@@ -133,7 +133,7 @@ describe('POST /wallets/:id/top-up', () => {
         const response = await request(app)
             .post('/wallets/999999/top-up')
             .set('Authorization', `Bearer ${createToken('10')}`)
-            .set('Idempotency-Key', 'topup-test-004')
+            .set('Idempotency-Key', '10000000-0000-4000-8000-000000000004')
             .send({ amountPaise: '5000' });
 
         expect(response.status).toBe(404);
@@ -144,7 +144,7 @@ describe('POST /wallets/:id/top-up', () => {
     test('rejects a request without a JWT', async () => {
         const response = await request(app)
             .post('/wallets/1/top-up')
-            .set('Idempotency-Key', 'topup-test-005')
+            .set('Idempotency-Key', '10000000-0000-4000-8000-000000000005')
             .send({ amountPaise: '5000' });
 
         expect(response.status).toBe(401);

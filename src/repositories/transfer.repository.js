@@ -205,7 +205,7 @@ async function transferBetweenWallets({
             if (!existing || existing.request_hash !== requestHash) {
                 throw createError(
                     'This Idempotency-Key was already used for a different request.',
-                    409,
+                    422,
                     'IDEMPOTENCY_KEY_REUSED'
                 );
             }
@@ -296,13 +296,13 @@ async function transferBetweenWallets({
             );
         }
 
-        const responseBody = {
+        const responseBody = JSON.parse(JSON.stringify({
             data: {
                 transfer,
                 sourceWallet: updatedSource.rows[0],
                 destinationWallet: updatedDestination.rows[0]
             }
-        };
+        }));
 
         await client.query(
             `INSERT INTO transfer_status_audit

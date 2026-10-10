@@ -364,7 +364,7 @@ describe('Wallet transfer PostgreSQL integration', () => {
                 amountPaise: '200'
             })
         ).rejects.toMatchObject({
-            status: 409,
+            status: 422,
             code: 'IDEMPOTENCY_KEY_REUSED'
         });
     });

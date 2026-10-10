@@ -132,7 +132,7 @@ async function topUpWallet({
                         'This Idempotency-Key was already used for a different request.'
                     ),
                     {
-                        status: 409,
+                        status: 422,
                         code: 'IDEMPOTENCY_KEY_REUSED',
                     }
                 );
@@ -301,12 +301,12 @@ async function topUpWallet({
             );
         }
 
-        const responseBody = {
+        const responseBody = JSON.parse(JSON.stringify({
             data: {
                 transfer,
                 wallet: updatedWalletResult.rows[0],
             },
-        };
+        }));
 
         // Audit the completed transfer.
         await client.query(

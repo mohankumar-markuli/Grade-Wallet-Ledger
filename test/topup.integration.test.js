@@ -283,7 +283,7 @@ describe('Top-up PostgreSQL integration', () => {
                 idempotencyKey,
             })
         ).rejects.toMatchObject({
-            status: 409,
+            status: 422,
             code: 'IDEMPOTENCY_KEY_REUSED',
         });
 

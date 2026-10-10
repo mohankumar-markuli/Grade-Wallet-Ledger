@@ -11,7 +11,7 @@ This document records the schema decisions for the Grade Wallet Ledger against t
 | System account | `accounts` | Cash-in, cash-out and fee revenue are accounts with no user owner. `account_type` distinguishes wallet from system account; `account_name` distinguishes a system account's purpose. |
 | Transfer | `transfers` | A transfer is the business event: type, status, amount, creation time, and optional reference to the original transfer when it reverses one. |
 | Ledger entry / debit / credit / ledger line | `ledger_entries` | These are individual accounting lines. Each line belongs to one account and one transfer; direction is stored separately from its positive amount. |
-| Idempotency key | `idempotency_keys` | Stores a client's key, user scope, request hash, processing state and saved response. The key is unique per user. |
+| Idempotency key | `idempotency_keys` | Stores a client's key, request hash, processing state and saved response. Authenticated keys are unique per user. Anonymous user registration has no authenticated user ID, so those keys use a null user scope and a separate unique key index. |
 | Fraud rule | `risk_rules` | Rules and their configuration must be stored and managed independently of source code. |
 | Fraud flag / review decision | `risk_flags` | Records a rule result for a transfer, including whether it is held or allowed with a flag and any review outcome. |
 | Reconciliation job / run | `reconciliation_runs` | A run has its own start/end, status and counts. The job itself is behavior, not a row. |
@@ -85,7 +85,7 @@ Ledger rows are append-only. PostgreSQL privileges/triggers prevent updates and 
 
 | Table | Attributes (in addition to generated `id`) | Constraints / relationships |
 | --- | --- | --- |
-| `idempotency_keys` | `user_id`, `idempotency_key`, `request_hash`, `status`, `response_status`, `response_body`, `created_at` | FK to user; unique (`user_id`, `idempotency_key`); request hash is SHA-256. |
+| `idempotency_keys` | `user_id`, `idempotency_key`, `request_hash`, `status`, `response_status`, `response_body`, `created_at` | Nullable FK to user; authenticated keys unique (`user_id`, `idempotency_key`); anonymous registration keys unique by `idempotency_key` when `user_id` is null; request hash is SHA-256. |
 | `transfer_status_audit` | `transfer_id`, `old_status`, `new_status`, `actor_user_id`, `changed_at` | FK to transfer; nullable old status for the initial status event; actor identifies a user when a user made the change and may be null for a system actor. |
 | `risk_rules` | `rule_code`, `description`, `enabled`, `configuration` | Rule code unique; configuration stores the rule's parameters. |
 | `risk_flags` | `transfer_id`, `rule_id`, `decision`, `severity`, `status`, `details`, `created_at`, `resolved_at` | FKs to transfer and rule; decision records held or allowed-with-flag behavior, while status tracks review. |
@@ -104,7 +104,7 @@ The brief does not prescribe fraud vocabulary, KYC states, transfer status value
 | Account to ledger entry | One account has zero or many ledger entries; each entry belongs to exactly one account. | `ledger_entries.account_id`. |
 | Transfer to ledger entry | One transfer has two or more entries; each entry belongs to exactly one transfer. | `ledger_entries.transfer_id`. |
 | Transfer to original transfer | One transfer may reverse zero or one original transfer; one original may have zero or more reversals unless a later policy limits it. | `transfers.original_transfer_id` self-reference. |
-| User to idempotency key | One user has zero or many keys; each key belongs to one user. | `idempotency_keys.user_id`. |
+| User to idempotency key | One user has zero or many authenticated keys; an anonymous registration key has no user ID until user creation completes. | `idempotency_keys.user_id`. |
 | Transfer to status audit event | One transfer has one or many audit events; each event belongs to one transfer. | `transfer_status_audit.transfer_id`. |
 | User to audit event | A user may act on many events; an event may have one user actor or a system actor. | `transfer_status_audit.actor_user_id`. |
 | Risk rule to risk flag | One rule can produce many flags; each flag references the rule that fired. | `risk_flags.rule_id`. |
@@ -121,7 +121,7 @@ erDiagram
     ACCOUNTS ||--o{ LEDGER_ENTRIES : records
     TRANSFERS ||--|{ LEDGER_ENTRIES : contains
     TRANSFERS o|--o{ TRANSFERS : reverses
-    USERS ||--o{ IDEMPOTENCY_KEYS : owns
+    USERS o|--o{ IDEMPOTENCY_KEYS : scopes_authenticated_keys
     TRANSFERS ||--o{ TRANSFER_STATUS_AUDIT : changes
     USERS o|--o{ TRANSFER_STATUS_AUDIT : acts
     TRANSFERS ||--o{ RISK_FLAGS : receives
@@ -149,5 +149,7 @@ The repository currently has tables for users, accounts, transfers, ledger entri
 The original schema lacks user phone and KYC status, account names, transfer type and reversal reference, idempotency processing status, an audit actor, and database-enforced ledger immutability. The replacement first migration requires phone and KYC status for new databases. Migration 010 adds them as nullable for already-migrated databases so real legacy user data is not fabricated; those databases need a real data backfill before making them required. Migration 010 adds the remaining columns and integrity rules, and creates named cash-out and fee-revenue accounts. It maps the legacy external-funding account to the cash-in name but retains its legacy `account_type` so the current top-up repository still runs. A future coordinated code change can replace that legacy label with `system`.
 
 The existing application schema has additional implementation fields such as user `status`/`password_hash`, account `status`, transfer `currency`/`description`/`completed_at`, and audit `reason`; the brief does not require these as separate domain concepts. The current application code does not supply phone or KYC status when creating a user, does not assign wallet names, and does not populate `actor_user_id` on audit rows. Those are application gaps to close before relying on the new fields in live operations. The legacy `external_funding` label also remains in the current schema for compatibility. The migration adds a deferred database check that requires completed transfers to have at least two balanced ledger entries; pending, held and failed transfers can have no ledger lines because they have not moved funds.
+
+Migration 011 makes `idempotency_keys.user_id` nullable only to support a public user-registration request, which has no authenticated user ID before the user is created. A partial unique index makes the key unique in that anonymous scope. Authenticated operations continue to use the existing unique (`user_id`, `idempotency_key`) constraint.
 
 The live development database is `wallet_db`; it must not be used for schema-migration verification. The configured test database is `wallet_test_db`. Its current schema and data must be inspected before any reset or destructive test.
