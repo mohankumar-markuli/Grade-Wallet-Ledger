@@ -59,6 +59,7 @@ function normalizeIdempotencyKey(key) {
 async function transferBetweenWallets({
     fromWalletId,
     toWalletId,
+    userId,
     amountPaise,
     idempotencyKey
 }) {
@@ -70,6 +71,14 @@ async function transferBetweenWallets({
             'Both wallet IDs must be positive integers.',
             400,
             'VALIDATION_ERROR'
+        );
+    }
+
+    if (!/^[1-9]\d*$/.test(String(userId))) {
+        throw createError(
+            'A valid authenticated user ID is required.',
+            401,
+            'UNAUTHORIZED'
         );
     }
 
@@ -89,12 +98,15 @@ async function transferBetweenWallets({
         await client.query('BEGIN');
 
         // Lock both wallets in ID order to reduce deadlock risk.
-        const walletIds = [String(fromWalletId), String(toWalletId)]
-            .sort((a, b) => {
-                const left = BigInt(a);
-                const right = BigInt(b);
-                return left < right ? -1 : left > right ? 1 : 0;
-            });
+        const walletIds = [
+            String(fromWalletId),
+            String(toWalletId)
+        ].sort((a, b) => {
+            const left = BigInt(a);
+            const right = BigInt(b);
+
+            return left < right ? -1 : left > right ? 1 : 0;
+        });
 
         const walletResult = await client.query(
             `SELECT id, user_id, account_type, currency,
@@ -107,9 +119,11 @@ async function transferBetweenWallets({
         );
 
         const wallets = walletResult.rows;
+
         const source = wallets.find(
             wallet => String(wallet.id) === String(fromWalletId)
         );
+
         const destination = wallets.find(
             wallet => String(wallet.id) === String(toWalletId)
         );
@@ -127,7 +141,19 @@ async function transferBetweenWallets({
             );
         }
 
-        if (source.status !== 'active' || destination.status !== 'active') {
+        // Enforce ownership inside the transaction.
+        if (String(source.user_id) !== String(userId)) {
+            throw createError(
+                'Source wallet was not found.',
+                404,
+                'WALLET_NOT_FOUND'
+            );
+        }
+
+        if (
+            source.status !== 'active' ||
+            destination.status !== 'active'
+        ) {
             throw createError(
                 'Both wallets must be active.',
                 409,
@@ -135,7 +161,10 @@ async function transferBetweenWallets({
             );
         }
 
-        if (source.currency !== 'INR' || destination.currency !== 'INR') {
+        if (
+            source.currency !== 'INR' ||
+            destination.currency !== 'INR'
+        ) {
             throw createError(
                 'Unsupported wallet currency.',
                 400,
@@ -236,17 +265,36 @@ async function transferBetweenWallets({
             `UPDATE accounts
              SET balance_paise = balance_paise - $1::bigint
              WHERE id = $2
+               AND user_id = $3
+               AND account_type = 'wallet'
              RETURNING id, user_id, currency, balance_paise, status`,
-            [amount, source.id]
+            [amount, source.id, userId]
         );
+
+        if (updatedSource.rowCount !== 1) {
+            throw createError(
+                'Source wallet was not found.',
+                404,
+                'WALLET_NOT_FOUND'
+            );
+        }
 
         const updatedDestination = await client.query(
             `UPDATE accounts
              SET balance_paise = balance_paise + $1::bigint
              WHERE id = $2
+               AND account_type = 'wallet'
              RETURNING id, user_id, currency, balance_paise, status`,
             [amount, destination.id]
         );
+
+        if (updatedDestination.rowCount !== 1) {
+            throw createError(
+                'Destination wallet was not found.',
+                404,
+                'WALLET_NOT_FOUND'
+            );
+        }
 
         const responseBody = {
             data: {

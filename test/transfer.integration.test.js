@@ -148,13 +148,12 @@ describe('Wallet transfer PostgreSQL integration', () => {
     });
 
     test('transfers funds and creates balanced ledger entries', async () => {
-        const key = `transfer-${crypto.randomUUID()}`;
-
         const result = await transferBetweenWallets({
             fromWalletId: String(walletA),
             toWalletId: String(walletB),
+            userId: String(userA),
             amountPaise: '3000',
-            idempotencyKey: key
+            idempotencyKey: `transfer-${crypto.randomUUID()}`
         });
 
         expect(result.status).toBe(201);
@@ -202,13 +201,12 @@ describe('Wallet transfer PostgreSQL integration', () => {
     });
 
     test('replays the same request without moving funds twice', async () => {
-        const key = `transfer-replay-${crypto.randomUUID()}`;
-
         const request = {
             fromWalletId: String(walletA),
             toWalletId: String(walletB),
+            userId: String(userA),
             amountPaise: '500',
-            idempotencyKey: key
+            idempotencyKey: `transfer-replay-${crypto.randomUUID()}`
         };
 
         const first = await transferBetweenWallets(request);
@@ -233,15 +231,61 @@ describe('Wallet transfer PostgreSQL integration', () => {
         expect(count.rows[0].count).toBe('1');
     });
 
-    test('rejects insufficient funds without changing balances', async () => {
-        const key = `transfer-insufficient-${crypto.randomUUID()}`;
+    test('rejects a transfer when the source wallet belongs to another user', async () => {
+        const idempotencyKey =
+            `transfer-ownership-${crypto.randomUUID()}`;
 
         await expect(
             transferBetweenWallets({
                 fromWalletId: String(walletA),
                 toWalletId: String(walletB),
+                userId: String(userB),
+                amountPaise: '1000',
+                idempotencyKey
+            })
+        ).rejects.toMatchObject({
+            status: 404,
+            code: 'WALLET_NOT_FOUND'
+        });
+
+        const balances = await pool.query(
+            `SELECT id, balance_paise
+             FROM accounts
+             WHERE id = ANY($1::bigint[])`,
+            [[String(walletA), String(walletB)]]
+        );
+
+        const balanceById = new Map(
+            balances.rows.map(row => [
+                String(row.id),
+                String(row.balance_paise)
+            ])
+        );
+
+        expect(balanceById.get(String(walletA))).toBe('10000');
+        expect(balanceById.get(String(walletB))).toBe('2000');
+
+        // Check this specific request, not all historical transfers
+        // between these wallets.
+        const idempotencyResult = await pool.query(
+            `SELECT id
+             FROM idempotency_keys
+             WHERE user_id = $1 AND idempotency_key = $2`,
+            [userB, idempotencyKey]
+        );
+
+        expect(idempotencyResult.rowCount).toBe(0);
+    });
+
+    test('rejects insufficient funds without changing balances', async () => {
+        await expect(
+            transferBetweenWallets({
+                fromWalletId: String(walletA),
+                toWalletId: String(walletB),
+                userId: String(userA),
                 amountPaise: '999999',
-                idempotencyKey: key
+                idempotencyKey:
+                    `transfer-insufficient-${crypto.randomUUID()}`
             })
         ).rejects.toMatchObject({
             status: 409,
@@ -267,13 +311,13 @@ describe('Wallet transfer PostgreSQL integration', () => {
     });
 
     test('rejects reuse of an idempotency key with a different amount', async () => {
-        const key = `transfer-key-conflict-${crypto.randomUUID()}`;
-
         const request = {
             fromWalletId: String(walletA),
             toWalletId: String(walletB),
+            userId: String(userA),
             amountPaise: '100',
-            idempotencyKey: key
+            idempotencyKey:
+                `transfer-key-conflict-${crypto.randomUUID()}`
         };
 
         await transferBetweenWallets(request);
@@ -290,21 +334,22 @@ describe('Wallet transfer PostgreSQL integration', () => {
     });
 
     test('prevents concurrent transfers from overspending the source wallet', async () => {
-        const keyA = `transfer-concurrent-a-${crypto.randomUUID()}`;
-        const keyB = `transfer-concurrent-b-${crypto.randomUUID()}`;
-
         const results = await Promise.allSettled([
             transferBetweenWallets({
                 fromWalletId: String(walletA),
                 toWalletId: String(walletB),
+                userId: String(userA),
                 amountPaise: '7000',
-                idempotencyKey: keyA
+                idempotencyKey:
+                    `transfer-concurrent-a-${crypto.randomUUID()}`
             }),
             transferBetweenWallets({
                 fromWalletId: String(walletA),
                 toWalletId: String(walletB),
+                userId: String(userA),
                 amountPaise: '7000',
-                idempotencyKey: keyB
+                idempotencyKey:
+                    `transfer-concurrent-b-${crypto.randomUUID()}`
             })
         ]);
 
@@ -351,15 +396,14 @@ describe('Wallet transfer PostgreSQL integration', () => {
         expect(transferCount.rows[0].count).toBe('1');
     });
 
-
     test('rolls back the entire transfer when a database operation fails', async () => {
         const key = `transfer-rollback-${crypto.randomUUID()}`;
 
-        // Remove leftovers if a previous interrupted test run left them behind.
         await pool.query(
             `DROP TRIGGER IF EXISTS test_fail_transfer_wallet_update
              ON accounts`
         );
+
         await pool.query(
             `DROP FUNCTION IF EXISTS test_fail_transfer_wallet_update_fn()`
         );
@@ -390,15 +434,19 @@ describe('Wallet transfer PostgreSQL integration', () => {
                 transferBetweenWallets({
                     fromWalletId: String(walletA),
                     toWalletId: String(walletB),
+                    userId: String(userA),
                     amountPaise: '1000',
                     idempotencyKey: key
                 })
-            ).rejects.toThrow('Forced transfer integration test failure');
+            ).rejects.toThrow(
+                'Forced transfer integration test failure'
+            );
         } finally {
             await pool.query(
                 `DROP TRIGGER IF EXISTS test_fail_transfer_wallet_update
                  ON accounts`
             );
+
             await pool.query(
                 `DROP FUNCTION IF EXISTS test_fail_transfer_wallet_update_fn()`
             );
@@ -427,6 +475,7 @@ describe('Wallet transfer PostgreSQL integration', () => {
              WHERE user_id = $1 AND idempotency_key = $2`,
             [userA, key]
         );
+
         expect(idempotencyResult.rowCount).toBe(0);
 
         const transferResult = await pool.query(
@@ -437,8 +486,7 @@ describe('Wallet transfer PostgreSQL integration', () => {
                AND amount_paise = 1000`,
             [walletA, walletB]
         );
+
         expect(transferResult.rowCount).toBe(0);
     });
-
-
 });

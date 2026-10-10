@@ -18,6 +18,7 @@ describe('transferBetweenWallets validation', () => {
             transferBetweenWallets({
                 fromWalletId: '1',
                 toWalletId: '1',
+                userId: '10',
                 amountPaise: '1000',
                 idempotencyKey: 'transfer-test-1'
             })
@@ -34,6 +35,7 @@ describe('transferBetweenWallets validation', () => {
             transferBetweenWallets({
                 fromWalletId: '0',
                 toWalletId: '2',
+                userId: '10',
                 amountPaise: '1000',
                 idempotencyKey: 'transfer-test-2'
             })
@@ -50,6 +52,7 @@ describe('transferBetweenWallets validation', () => {
             transferBetweenWallets({
                 fromWalletId: '1',
                 toWalletId: '2',
+                userId: '10',
                 amountPaise: '10.5',
                 idempotencyKey: 'transfer-test-3'
             })
@@ -66,6 +69,7 @@ describe('transferBetweenWallets validation', () => {
             transferBetweenWallets({
                 fromWalletId: '1',
                 toWalletId: '2',
+                userId: '10',
                 amountPaise: '0',
                 idempotencyKey: 'transfer-test-4'
             })
@@ -82,11 +86,45 @@ describe('transferBetweenWallets validation', () => {
             transferBetweenWallets({
                 fromWalletId: '1',
                 toWalletId: '2',
+                userId: '10',
                 amountPaise: '1000'
             })
         ).rejects.toMatchObject({
             status: 400,
             code: 'IDEMPOTENCY_KEY_REQUIRED'
+        });
+
+        expect(pool.connect).not.toHaveBeenCalled();
+    });
+
+    test('rejects a missing authenticated user ID', async () => {
+        await expect(
+            transferBetweenWallets({
+                fromWalletId: '1',
+                toWalletId: '2',
+                amountPaise: '1000',
+                idempotencyKey: 'transfer-test-user'
+            })
+        ).rejects.toMatchObject({
+            status: 401,
+            code: 'UNAUTHORIZED'
+        });
+
+        expect(pool.connect).not.toHaveBeenCalled();
+    });
+
+    test('rejects a non-positive authenticated user ID', async () => {
+        await expect(
+            transferBetweenWallets({
+                fromWalletId: '1',
+                toWalletId: '2',
+                userId: '0',
+                amountPaise: '1000',
+                idempotencyKey: 'transfer-test-invalid-user'
+            })
+        ).rejects.toMatchObject({
+            status: 401,
+            code: 'UNAUTHORIZED'
         });
 
         expect(pool.connect).not.toHaveBeenCalled();

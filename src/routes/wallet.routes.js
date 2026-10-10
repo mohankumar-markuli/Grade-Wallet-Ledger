@@ -168,8 +168,9 @@ router.post('/:id/transfer', async (req, res, next) => {
         const result = await transferBetweenWallets({
             fromWalletId,
             toWalletId: String(toWalletId),
+            userId: req.user.id,
             amountPaise: req.body?.amountPaise,
-            idempotencyKey: req.get('Idempotency-Key'),
+            idempotencyKey: req.get('Idempotency-Key')
         });
 
         return res.status(result.status).json(result.body);

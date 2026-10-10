@@ -90,6 +90,7 @@ describe('POST /wallets/:id/transfer', () => {
         expect(transferBetweenWallets).toHaveBeenCalledWith({
             fromWalletId: '1',
             toWalletId: '2',
+            userId: '10',
             amountPaise: '1000',
             idempotencyKey: 'route-transfer-001',
         });
