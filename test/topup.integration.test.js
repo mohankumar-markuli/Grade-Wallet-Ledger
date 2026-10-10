@@ -89,30 +89,53 @@ describe('Top-up PostgreSQL integration', () => {
     });
 
     afterAll(async () => {
+        const cleanupClient = await pool.connect();
+        let transactionStarted = false;
+
         try {
+            const databaseResult = await cleanupClient.query(
+                'SELECT current_database() AS name'
+            );
+
+            if (databaseResult.rows[0].name !== 'wallet_test_db') {
+                throw new Error(
+                    'Safety check failed: integration cleanup must use wallet_test_db.'
+                );
+            }
+
+            await cleanupClient.query('BEGIN');
+            transactionStarted = true;
+
             // Remove any test-only trigger left behind by a previous run.
-            await pool.query(
+            await cleanupClient.query(
                 'DROP TRIGGER IF EXISTS test_force_wallet_update_failure ON accounts'
             );
 
-            await pool.query(
+            await cleanupClient.query(
                 'DROP FUNCTION IF EXISTS test_fail_wallet_update()'
             );
 
+            // Test fixture deletion is the only place that bypasses the
+            // production append-only rule. The transaction ensures a failure
+            // rolls back and restores the trigger state.
+            await cleanupClient.query(
+                'ALTER TABLE ledger_entries DISABLE TRIGGER ledger_entries_append_only'
+            );
+
             if (userId) {
-                await pool.query(
+                await cleanupClient.query(
                     'DELETE FROM idempotency_keys WHERE user_id = $1',
                     [userId]
                 );
             }
 
             if (walletId) {
-                await pool.query(
+                await cleanupClient.query(
                     'DELETE FROM ledger_entries WHERE account_id = $1',
                     [walletId]
                 );
 
-                await pool.query(
+                await cleanupClient.query(
                     `DELETE FROM transfer_status_audit
                      WHERE transfer_id IN (
                          SELECT id FROM transfers
@@ -121,7 +144,7 @@ describe('Top-up PostgreSQL integration', () => {
                     [walletId]
                 );
 
-                await pool.query(
+                await cleanupClient.query(
                     `DELETE FROM ledger_entries
                      WHERE transfer_id IN (
                          SELECT id FROM transfers
@@ -130,7 +153,7 @@ describe('Top-up PostgreSQL integration', () => {
                     [walletId]
                 );
 
-                await pool.query(
+                await cleanupClient.query(
                     `DELETE FROM idempotency_keys
                      WHERE transfer_id IN (
                          SELECT id FROM transfers
@@ -139,20 +162,20 @@ describe('Top-up PostgreSQL integration', () => {
                     [walletId]
                 );
 
-                await pool.query(
+                await cleanupClient.query(
                     `DELETE FROM transfers
                      WHERE from_account_id = $1 OR to_account_id = $1`,
                     [walletId]
                 );
 
-                await pool.query(
+                await cleanupClient.query(
                     'DELETE FROM accounts WHERE id = $1',
                     [walletId]
                 );
             }
 
             if (userId) {
-                await pool.query(
+                await cleanupClient.query(
                     'DELETE FROM users WHERE id = $1',
                     [userId]
                 );
@@ -163,15 +186,28 @@ describe('Top-up PostgreSQL integration', () => {
                 fundingAccountId !== undefined &&
                 originalFundingBalance !== undefined
             ) {
-                await pool.query(
+                await cleanupClient.query(
                     `UPDATE accounts
                      SET balance_paise = $1::bigint
                      WHERE id = $2`,
                     [originalFundingBalance.toString(), fundingAccountId]
                 );
             }
+
+            await cleanupClient.query(
+                'ALTER TABLE ledger_entries ENABLE TRIGGER ledger_entries_append_only'
+            );
+            await cleanupClient.query('COMMIT');
+            transactionStarted = false;
         } finally {
-            await pool.end();
+            try {
+                if (transactionStarted) {
+                    await cleanupClient.query('ROLLBACK');
+                }
+            } finally {
+                cleanupClient.release();
+                await pool.end();
+            }
         }
     });
 

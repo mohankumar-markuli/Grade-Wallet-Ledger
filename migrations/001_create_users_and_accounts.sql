@@ -1,8 +1,9 @@
-
 CREATE TABLE users (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     email VARCHAR(254) NOT NULL,
     full_name VARCHAR(120) NOT NULL,
+    phone TEXT NOT NULL,
+    kyc_status TEXT NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'active',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -13,6 +14,10 @@ CREATE TABLE users (
         CHECK (LENGTH(TRIM(email)) > 0),
     CONSTRAINT users_full_name_not_blank
         CHECK (LENGTH(TRIM(full_name)) > 0),
+    CONSTRAINT users_phone_not_blank
+        CHECK (LENGTH(TRIM(phone)) > 0),
+    CONSTRAINT users_kyc_status_not_blank
+        CHECK (LENGTH(TRIM(kyc_status)) > 0),
     CONSTRAINT users_status_valid
         CHECK (status IN ('active', 'suspended', 'closed')),
     CONSTRAINT users_email_unique

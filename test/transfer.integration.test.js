@@ -95,15 +95,38 @@ describe('Wallet transfer PostgreSQL integration', () => {
     });
 
     afterAll(async () => {
+        const cleanupClient = await pool.connect();
+        let transactionStarted = false;
+
         try {
+            const databaseResult = await cleanupClient.query(
+                'SELECT current_database() AS name'
+            );
+
+            if (databaseResult.rows[0].name !== 'wallet_test_db') {
+                throw new Error(
+                    'Safety check failed: integration cleanup must use wallet_test_db.'
+                );
+            }
+
+            await cleanupClient.query('BEGIN');
+            transactionStarted = true;
+
+            // Test fixture deletion is the only place that bypasses the
+            // production append-only rule. The transaction ensures a failure
+            // rolls back and restores the trigger state.
+            await cleanupClient.query(
+                'ALTER TABLE ledger_entries DISABLE TRIGGER ledger_entries_append_only'
+            );
+
             if (walletA && walletB) {
-                await pool.query(
+                await cleanupClient.query(
                     `DELETE FROM idempotency_keys
                      WHERE user_id = ANY($1::bigint[])`,
                     [[String(userA), String(userB)]]
                 );
 
-                await pool.query(
+                await cleanupClient.query(
                     `DELETE FROM ledger_entries
                      WHERE transfer_id IN (
                          SELECT id FROM transfers
@@ -113,7 +136,7 @@ describe('Wallet transfer PostgreSQL integration', () => {
                     [[String(walletA), String(walletB)]]
                 );
 
-                await pool.query(
+                await cleanupClient.query(
                     `DELETE FROM transfer_status_audit
                      WHERE transfer_id IN (
                          SELECT id FROM transfers
@@ -123,27 +146,40 @@ describe('Wallet transfer PostgreSQL integration', () => {
                     [[String(walletA), String(walletB)]]
                 );
 
-                await pool.query(
+                await cleanupClient.query(
                     `DELETE FROM transfers
                      WHERE from_account_id = ANY($1::bigint[])
                         OR to_account_id = ANY($1::bigint[])`,
                     [[String(walletA), String(walletB)]]
                 );
 
-                await pool.query(
+                await cleanupClient.query(
                     'DELETE FROM accounts WHERE id = ANY($1::bigint[])',
                     [[String(walletA), String(walletB)]]
                 );
             }
 
             if (userA && userB) {
-                await pool.query(
+                await cleanupClient.query(
                     'DELETE FROM users WHERE id = ANY($1::bigint[])',
                     [[String(userA), String(userB)]]
                 );
             }
+
+            await cleanupClient.query(
+                'ALTER TABLE ledger_entries ENABLE TRIGGER ledger_entries_append_only'
+            );
+            await cleanupClient.query('COMMIT');
+            transactionStarted = false;
         } finally {
-            await pool.end();
+            try {
+                if (transactionStarted) {
+                    await cleanupClient.query('ROLLBACK');
+                }
+            } finally {
+                cleanupClient.release();
+                await pool.end();
+            }
         }
     });
 
