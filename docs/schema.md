@@ -153,3 +153,11 @@ The existing application schema has additional implementation fields such as use
 Migration 011 makes `idempotency_keys.user_id` nullable only to support a public user-registration request, which has no authenticated user ID before the user is created. A partial unique index makes the key unique in that anonymous scope. Authenticated operations continue to use the existing unique (`user_id`, `idempotency_key`) constraint.
 
 The live development database is `wallet_db`; it must not be used for schema-migration verification. The configured test database is `wallet_test_db`. Its current schema and data must be inspected before any reset or destructive test.
+
+## Milestone 4 reconciliation schema additions
+
+Migration 012 adds an idempotency key, SHA-256 request hash, and saved response body to reconciliation_runs for retries of a manual reconciliation POST. Cron runs leave those fields null. A unique partial index prevents two report runs from claiming the same manual key.
+
+The same migration seeds the nightly_reconciliation row in job_locks. The application holds this row with SELECT FOR UPDATE NOWAIT inside the Repeatable Read report transaction; transaction row locking is the exclusion mechanism, not the descriptive expiry value.
+
+A global ledger-total finding and a parentless ledger-entry finding may not have a valid account or transfer ID. Migration 012 therefore permits those two problem types to have null subject references. All other report findings identify their account or transfer.

@@ -3,6 +3,7 @@ const express = require('express');
 const authRoutes = require('./routes/auth.routes');
 const userRoutes = require('./routes/user.routes');
 const walletRoutes = require('./routes/wallet.routes');
+const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
 
@@ -18,5 +19,6 @@ app.get('/api/health', (req, res) => {
 
 app.use('/users', userRoutes);
 app.use('/wallets', walletRoutes);
+app.use('/admin', adminRoutes);
 
 module.exports = app;

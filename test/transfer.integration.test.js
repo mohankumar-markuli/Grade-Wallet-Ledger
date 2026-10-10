@@ -18,6 +18,100 @@ const {
     transferBetweenWallets
 } = require('../src/repositories/transfer.repository');
 
+async function removeAbandonedTransferFixtures() {
+    const client = await pool.connect();
+    let transactionStarted = false;
+
+    try {
+        const databaseResult = await client.query(
+            'SELECT current_database() AS name'
+        );
+        if (databaseResult.rows[0].name !== 'wallet_test_db') {
+            throw new Error(
+                'Safety check failed: abandoned fixtures may only be removed from wallet_test_db.'
+            );
+        }
+
+        await client.query('BEGIN');
+        transactionStarted = true;
+
+        const userResult = await client.query(
+            [
+                'SELECT id FROM users',
+                "WHERE email LIKE 'transfer-a-%@example.test'",
+                "   OR email LIKE 'transfer-b-%@example.test'"
+            ].join('\n')
+        );
+        const userIds = userResult.rows.map((row) => String(row.id));
+
+        if (userIds.length > 0) {
+            const accountResult = await client.query(
+                [
+                    'SELECT id FROM accounts',
+                    'WHERE user_id = ANY($1::bigint[])',
+                    "  AND account_type = 'wallet'"
+                ].join('\n'),
+                [userIds]
+            );
+            const accountIds = accountResult.rows.map((row) => String(row.id));
+
+            await client.query(
+                'ALTER TABLE ledger_entries DISABLE TRIGGER ledger_entries_append_only'
+            );
+
+            await client.query(
+                'DELETE FROM idempotency_keys WHERE user_id = ANY($1::bigint[])',
+                [userIds]
+            );
+
+            if (accountIds.length > 0) {
+                const relatedTransfers = [
+                    'SELECT id FROM transfers',
+                    'WHERE from_account_id = ANY($1::bigint[])',
+                    '   OR to_account_id = ANY($1::bigint[])'
+                ].join('\n');
+
+                await client.query(
+                    `DELETE FROM ledger_entries WHERE transfer_id IN (${relatedTransfers})`,
+                    [accountIds]
+                );
+                await client.query(
+                    `DELETE FROM transfer_status_audit WHERE transfer_id IN (${relatedTransfers})`,
+                    [accountIds]
+                );
+                await client.query(
+                    `DELETE FROM transfers WHERE id IN (${relatedTransfers})`,
+                    [accountIds]
+                );
+                await client.query(
+                    'DELETE FROM accounts WHERE id = ANY($1::bigint[])',
+                    [accountIds]
+                );
+            }
+
+            await client.query(
+                'DELETE FROM users WHERE id = ANY($1::bigint[])',
+                [userIds]
+            );
+
+            await client.query(
+                'ALTER TABLE ledger_entries ENABLE TRIGGER ledger_entries_append_only'
+            );
+        }
+
+        await client.query('COMMIT');
+        transactionStarted = false;
+    } catch (error) {
+        if (transactionStarted) {
+            await client.query('ROLLBACK');
+            transactionStarted = false;
+        }
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
 describe('Wallet transfer PostgreSQL integration', () => {
     let userA;
     let userB;
@@ -34,6 +128,8 @@ describe('Wallet transfer PostgreSQL integration', () => {
                 'Safety check failed: integration tests must use wallet_test_db.'
             );
         }
+
+        await removeAbandonedTransferFixtures();
 
         const userAResult = await pool.query(
             `INSERT INTO users (email, full_name)

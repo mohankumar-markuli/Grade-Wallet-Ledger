@@ -33,3 +33,16 @@ The repository contains a partial implementation. Its existing migrations and ap
 State-changing POST routes require an RFC 4122 UUID in `Idempotency-Key`. Authenticated wallet creation, top-ups and transfers use `(user_id, idempotency_key)` as their database scope. Public user registration has no authenticated user ID before it creates the user; migration 011 allows a null user scope and enforces unique registration keys with a partial unique index. `POST /auth/login` does not persist a state change and is not idempotency-keyed.
 
 The handler stores a SHA-256 request hash and the first response in the same transaction as the write. A matching key and request replays the saved response; a matching key with a different request returns HTTP 422. The PostgreSQL acceptance tests are in `test/idempotency.integration.test.js` and require the `wallet_test_db` migration to include migration 011.
+## Milestone 4: nightly reconciliation
+
+The reconciliation runner checks the ledger in one PostgreSQL REPEATABLE READ transaction. It verifies global debit/credit totals, completed-transfer balance, stored account balances against ledger-derived balances, nonnegative wallet ledger balances, and missing transfer or ledger parents. The ledger sign convention is credits minus debits for every account.
+
+Each run and its findings are saved in reconciliation_runs and reconciliation_problems. The runner reports inconsistencies and does not repair balances or ledger entries. When multiple checks identify the same underlying transfer corruption, the report stores one root finding and includes related account and global-total checks in its details; this avoids counting one damaged transfer several times.
+
+The nightly scheduler can run at 00:00 UTC in the API process when ENABLE_RECONCILIATION_SCHEDULER=true and RECONCILIATION_EXPECTED_DATABASE set to the exact checked database name. The scheduler stays disabled by default and refuses to start if that name does not match current_database(). The manual endpoint is POST /admin/reconciliation/run. Configure RECONCILIATION_ADMIN_TOKEN in the local environment with a random value of at least 32 characters and send it as a Bearer token. This local admin-token mechanism is an implementation assumption because the project does not yet have administrator accounts or roles. Manual runs also require the UUID Idempotency-Key header.
+
+Apply migration 012 only after confirming the configured database is wallet_test_db. The PostgreSQL acceptance test seeds 10,000 transfers, introduces three isolated corruptions, checks that they are reported without unrelated findings, verifies replay, and removes its fixture data. Run it with:
+
+    npm.cmd test -- --runInBand test/reconciliation.integration.test.js test/admin.reconciliation.routes.test.js test/reconciliation.scheduler.test.js
+
+The reconciliation benchmark helper in scripts/reconciliation-benchmark.js seeds one balanced transfer with one million ledger entries, runs EXPLAIN ANALYZE for all checks, and removes its fixture. Each action refuses to run unless DATABASE_URL selects wallet_test_db. Record the observed plan summaries in docs/reconciliation.md; do not describe the benchmark as complete until it has been run. Do not describe the benchmark as complete until it has been run against a large test dataset.
