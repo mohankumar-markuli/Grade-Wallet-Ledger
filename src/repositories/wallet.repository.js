@@ -1,3 +1,4 @@
+
 const pool = require('../config/db');
 
 async function createWallet({ userId }) {
@@ -13,15 +14,16 @@ async function createWallet({ userId }) {
     return result.rows[0];
 }
 
-async function getWalletBalance({ walletId }) {
+async function getWalletBalance({ walletId, userId }) {
     const query = `
         SELECT id, user_id, currency, balance_paise, status
         FROM accounts
         WHERE id = $1
+          AND user_id = $2
           AND account_type = 'wallet';
     `;
 
-    const result = await pool.query(query, [walletId]);
+    const result = await pool.query(query, [walletId, userId]);
 
     return result.rows[0] || null;
 }

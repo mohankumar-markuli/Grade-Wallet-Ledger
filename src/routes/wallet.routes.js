@@ -1,28 +1,26 @@
+
 const express = require('express');
-const { createWallet, getWalletBalance } = require('../repositories/wallet.repository');
+const {
+    createWallet,
+    getWalletBalance,
+} = require('../repositories/wallet.repository');
 const { topUpWallet } = require('../repositories/topup.repository');
-const { transferBetweenWallets } = require('../repositories/transfer.repository');
+const {
+    transferBetweenWallets,
+} = require('../repositories/transfer.repository');
+const authenticateToken = require('../middleware/auth.middleware');
 
 const router = express.Router();
 
+// All wallet endpoints require a valid JWT.
+router.use(authenticateToken);
+
+// Create a wallet for the authenticated user.
 router.post('/', async (req, res, next) => {
     try {
-        const userId = req.body?.userId;
-
-        if (
-            userId === undefined ||
-            userId === null ||
-            !/^[1-9]\d*$/.test(String(userId))
-        ) {
-            return res.status(400).json({
-                error: {
-                    code: 'VALIDATION_ERROR',
-                    message: 'A valid userId is required.',
-                },
-            });
-        }
-
-        const wallet = await createWallet({ userId: String(userId) });
+        const wallet = await createWallet({
+            userId: req.user.id,
+        });
 
         return res.status(201).json({ data: wallet });
     } catch (error) {
@@ -30,7 +28,7 @@ router.post('/', async (req, res, next) => {
             return res.status(404).json({
                 error: {
                     code: 'USER_NOT_FOUND',
-                    message: 'The specified user does not exist.',
+                    message: 'The authenticated user does not exist.',
                 },
             });
         }
@@ -39,6 +37,7 @@ router.post('/', async (req, res, next) => {
     }
 });
 
+// Get the authenticated user's wallet balance.
 router.get('/:id/balance', async (req, res, next) => {
     try {
         const walletId = req.params.id;
@@ -52,7 +51,10 @@ router.get('/:id/balance', async (req, res, next) => {
             });
         }
 
-        const wallet = await getWalletBalance({ walletId });
+        const wallet = await getWalletBalance({
+            walletId,
+            userId: req.user.id,
+        });
 
         if (!wallet) {
             return res.status(404).json({
@@ -63,14 +65,13 @@ router.get('/:id/balance', async (req, res, next) => {
             });
         }
 
-        return res.status(200).json({
-            data: wallet,
-        });
+        return res.status(200).json({ data: wallet });
     } catch (error) {
         return next(error);
     }
 });
 
+// Top up only the authenticated user's wallet.
 router.post('/:id/top-up', async (req, res, next) => {
     try {
         const walletId = req.params.id;
@@ -84,12 +85,24 @@ router.post('/:id/top-up', async (req, res, next) => {
             });
         }
 
-        const idempotencyKey = req.get('Idempotency-Key');
+        const wallet = await getWalletBalance({
+            walletId,
+            userId: req.user.id,
+        });
+
+        if (!wallet) {
+            return res.status(404).json({
+                error: {
+                    code: 'WALLET_NOT_FOUND',
+                    message: 'Wallet not found.',
+                },
+            });
+        }
 
         const result = await topUpWallet({
             walletId,
             amountPaise: req.body?.amountPaise,
-            idempotencyKey,
+            idempotencyKey: req.get('Idempotency-Key'),
         });
 
         return res.status(result.status).json(result.body);
@@ -107,7 +120,7 @@ router.post('/:id/top-up', async (req, res, next) => {
     }
 });
 
-
+// Transfer money only from the authenticated user's wallet.
 router.post('/:id/transfer', async (req, res, next) => {
     try {
         const fromWalletId = req.params.id;
@@ -117,6 +130,20 @@ router.post('/:id/transfer', async (req, res, next) => {
                 error: {
                     code: 'VALIDATION_ERROR',
                     message: 'A valid source wallet ID is required.',
+                },
+            });
+        }
+
+        const sourceWallet = await getWalletBalance({
+            walletId: fromWalletId,
+            userId: req.user.id,
+        });
+
+        if (!sourceWallet) {
+            return res.status(404).json({
+                error: {
+                    code: 'WALLET_NOT_FOUND',
+                    message: 'Wallet not found.',
                 },
             });
         }
@@ -157,6 +184,5 @@ router.post('/:id/transfer', async (req, res, next) => {
         return next(error);
     }
 });
-
 
 module.exports = router;
