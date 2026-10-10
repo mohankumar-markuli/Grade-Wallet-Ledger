@@ -1,3 +1,4 @@
+
 const express = require('express');
 const { createUser } = require('../repositories/user.repository');
 
@@ -15,11 +16,16 @@ router.post('/', async (req, res, next) => {
                 ? req.body.fullName.trim()
                 : '';
 
-        if (!email || !fullName) {
+        const password =
+            typeof req.body?.password === 'string'
+                ? req.body.password
+                : '';
+
+        if (!email || !fullName || !password) {
             return res.status(400).json({
                 error: {
                     code: 'VALIDATION_ERROR',
-                    message: 'Email and fullName are required.',
+                    message: 'Email, fullName, and password are required.',
                 },
             });
         }
@@ -33,7 +39,16 @@ router.post('/', async (req, res, next) => {
             });
         }
 
-        const user = await createUser({ email, fullName });
+        if (password.length < 12 || Buffer.byteLength(password, 'utf8') > 72) {
+            return res.status(400).json({
+                error: {
+                    code: 'VALIDATION_ERROR',
+                    message: 'Password must be at least 12 characters and no more than 72 UTF-8 bytes.',
+                },
+            });
+        }
+
+        const user = await createUser({ email, fullName, password });
 
         return res.status(201).json({ data: user });
     } catch (error) {

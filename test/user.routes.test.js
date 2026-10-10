@@ -1,3 +1,4 @@
+
 const request = require('supertest');
 const app = require('../src/app');
 const { createUser } = require('../src/repositories/user.repository');
@@ -25,13 +26,17 @@ describe('POST /users', () => {
             .send({
                 email: ' TEST@EXAMPLE.COM ',
                 fullName: ' Test User ',
+                password: 'correct-horse-battery-staple',
             });
 
         expect(response.status).toBe(201);
         expect(response.body.data.email).toBe('test@example.com');
+        expect(response.body.data.password_hash).toBeUndefined();
+
         expect(createUser).toHaveBeenCalledWith({
             email: 'test@example.com',
             fullName: 'Test User',
+            password: 'correct-horse-battery-staple',
         });
     });
 
@@ -39,6 +44,20 @@ describe('POST /users', () => {
         const response = await request(app)
             .post('/users')
             .send({ email: 'test@example.com' });
+
+        expect(response.status).toBe(400);
+        expect(response.body.error.code).toBe('VALIDATION_ERROR');
+        expect(createUser).not.toHaveBeenCalled();
+    });
+
+    test('rejects a password that is too short', async () => {
+        const response = await request(app)
+            .post('/users')
+            .send({
+                email: 'test@example.com',
+                fullName: 'Test User',
+                password: 'short',
+            });
 
         expect(response.status).toBe(400);
         expect(response.body.error.code).toBe('VALIDATION_ERROR');
@@ -55,6 +74,7 @@ describe('POST /users', () => {
             .send({
                 email: 'test@example.com',
                 fullName: 'Test User',
+                password: 'correct-horse-battery-staple',
             });
 
         expect(response.status).toBe(409);
