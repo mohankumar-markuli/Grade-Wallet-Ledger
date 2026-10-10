@@ -1,0 +1,73 @@
+const express = require('express');
+const {
+    createWallet,
+    getWalletBalance,
+} = require('../repositories/wallet.repository');
+const router = express.Router();
+
+router.post('/', async (req, res, next) => {
+    try {
+        const userId = req.body?.userId;
+
+        if (
+            userId === undefined ||
+            userId === null ||
+            !/^[1-9]\d*$/.test(String(userId))
+        ) {
+            return res.status(400).json({
+                error: {
+                    code: 'VALIDATION_ERROR',
+                    message: 'A valid userId is required.',
+                },
+            });
+        }
+
+        const wallet = await createWallet({ userId: String(userId) });
+
+        return res.status(201).json({ data: wallet });
+    } catch (error) {
+        if (error.code === '23503') {
+            return res.status(404).json({
+                error: {
+                    code: 'USER_NOT_FOUND',
+                    message: 'The specified user does not exist.',
+                },
+            });
+        }
+
+        return next(error);
+    }
+});
+
+router.get('/:id/balance', async (req, res, next) => {
+    try {
+        const walletId = req.params.id;
+
+        if (!/^[1-9]\d*$/.test(walletId)) {
+            return res.status(400).json({
+                error: {
+                    code: 'VALIDATION_ERROR',
+                    message: 'A valid wallet ID is required.',
+                },
+            });
+        }
+
+        const wallet = await getWalletBalance({ walletId });
+
+        if (!wallet) {
+            return res.status(404).json({
+                error: {
+                    code: 'WALLET_NOT_FOUND',
+                    message: 'Wallet not found.',
+                },
+            });
+        }
+
+        return res.status(200).json({
+            data: wallet,
+        });
+    } catch (error) {
+        return next(error);
+    }
+});
+module.exports = router;

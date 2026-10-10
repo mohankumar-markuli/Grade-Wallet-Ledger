@@ -1,5 +1,6 @@
-
 const express = require('express');
+const userRoutes = require('./routes/user.routes');
+const walletRoutes = require('./routes/wallet.routes');
 
 const app = express();
 
@@ -11,5 +12,8 @@ app.get('/api/health', (req, res) => {
         service: 'grade-wallet-ledger',
     });
 });
+
+app.use('/users', userRoutes);
+app.use('/wallets', walletRoutes);
 
 module.exports = app;
