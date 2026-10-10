@@ -1,8 +1,7 @@
 const express = require('express');
-const {
-    createWallet,
-    getWalletBalance,
-} = require('../repositories/wallet.repository');
+const { createWallet, getWalletBalance } = require('../repositories/wallet.repository');
+const { topUpWallet } = require('../repositories/topup.repository');
+
 const router = express.Router();
 
 router.post('/', async (req, res, next) => {
@@ -70,4 +69,41 @@ router.get('/:id/balance', async (req, res, next) => {
         return next(error);
     }
 });
+
+router.post('/:id/top-up', async (req, res, next) => {
+    try {
+        const walletId = req.params.id;
+
+        if (!/^[1-9]\d*$/.test(walletId)) {
+            return res.status(400).json({
+                error: {
+                    code: 'VALIDATION_ERROR',
+                    message: 'A valid wallet ID is required.',
+                },
+            });
+        }
+
+        const idempotencyKey = req.get('Idempotency-Key');
+
+        const result = await topUpWallet({
+            walletId,
+            amountPaise: req.body?.amountPaise,
+            idempotencyKey,
+        });
+
+        return res.status(result.status).json(result.body);
+    } catch (error) {
+        if (error.status && error.code) {
+            return res.status(error.status).json({
+                error: {
+                    code: error.code,
+                    message: error.message,
+                },
+            });
+        }
+
+        return next(error);
+    }
+});
+
 module.exports = router;
