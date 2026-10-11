@@ -24,7 +24,8 @@ To stop services, press Ctrl+C. For local development without Docker, install
 Node.js 22+, configure `DATABASE_URL`, then set
 `MIGRATION_EXPECTED_DATABASE` to the exact database name after checking the
 target. `npm run migrate` refuses to run unless those names match. Never point
-tests or seed data at a development database.
+tests or seed data at a development database. See [`docs/running.md`](docs/running.md)
+for the complete step-by-step project running guide.
 
 ## API
 
