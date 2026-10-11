@@ -1,5 +1,6 @@
 const crypto = require('node:crypto');
 const pool = require('../config/db');
+const { evaluateTransferRisk, insertRiskFlags } = require('../services/risk.service');
 
 const MAX_BIGINT = 9223372036854775807n;
 
@@ -192,7 +193,7 @@ async function topUpWallet({
         });
 
         const lockedResult = await client.query(
-            `SELECT id, account_type, currency, balance_paise, status
+            `SELECT id, user_id, account_type, currency, balance_paise, status
              FROM accounts
              WHERE id = ANY($1::bigint[])
              ORDER BY id
@@ -207,6 +208,7 @@ async function topUpWallet({
         const funding = lockedResult.rows.find(
             (account) => String(account.id) === fundingAccountId
         );
+
 
         if (
             !lockedWallet ||
@@ -238,6 +240,54 @@ async function topUpWallet({
             throw new Error('Unsupported account currency.');
         }
 
+        const riskStartedAt = process.hrtime.bigint();
+        const riskFindings = await evaluateTransferRisk(client, {
+            sourceAccountId: lockedWallet.id,
+            amountPaise: amount,
+            checkVelocity: false
+        });
+        const riskEvaluationMs = Number(process.hrtime.bigint() - riskStartedAt) / 1e6;
+        const held = riskFindings.some(({ rule }) => rule.configuration?.action === 'hold');
+
+        if (held) {
+            const heldTransfer = (await client.query(
+                `INSERT INTO transfers
+                    (from_account_id, to_account_id, amount_paise, currency,
+                     status, description, transfer_type)
+                 VALUES ($1, $2, $3, 'INR', 'held', $4, 'top_up')
+                 RETURNING id, from_account_id, to_account_id, amount_paise,
+                           currency, status, created_at, completed_at`,
+                [fundingAccountId, lockedWallet.id, amount, 'Wallet top-up']
+            )).rows[0];
+            await insertRiskFlags(client, {
+                userId: lockedWallet.user_id,
+                accountId: lockedWallet.id,
+                transferId: heldTransfer.id,
+                findings: riskFindings,
+                held: true
+            });
+            const responseBody = { data: {
+                transfer: heldTransfer,
+                held: true,
+                message: 'Top-up held for administrator review.',
+                riskEvaluationMs
+            } };
+            await client.query(
+                `INSERT INTO transfer_status_audit
+                    (transfer_id, old_status, new_status, reason, actor_user_id, actor_type)
+                 VALUES ($1, NULL, 'held', 'Configured fraud rule matched', $2, 'user')`,
+                [heldTransfer.id, lockedWallet.user_id]
+            );
+            await client.query(
+                `UPDATE idempotency_keys
+                 SET response_status = 202, response_body = $1::jsonb, transfer_id = $2
+                 WHERE user_id = $3 AND idempotency_key = $4`,
+                [JSON.stringify(responseBody), heldTransfer.id, wallet.user_id, key]
+            );
+            await client.query('COMMIT');
+            return { status: 202, body: responseBody, replayed: false };
+        }
+
         // Record the completed top-up transfer.
         const transferResult = await client.query(
             `INSERT INTO transfers
@@ -256,6 +306,16 @@ async function topUpWallet({
         );
 
         const transfer = transferResult.rows[0];
+
+        if (riskFindings.length > 0) {
+            await insertRiskFlags(client, {
+                userId: lockedWallet.user_id,
+                accountId: lockedWallet.id,
+                transferId: transfer.id,
+                findings: riskFindings,
+                held: false
+            });
+        }
 
         // Record balanced debit and credit ledger entries.
         await client.query(
@@ -305,17 +365,20 @@ async function topUpWallet({
             data: {
                 transfer,
                 wallet: updatedWalletResult.rows[0],
+                riskEvaluationMs,
+                flagged: riskFindings.length > 0,
             },
         }));
 
         // Audit the completed transfer.
         await client.query(
             `INSERT INTO transfer_status_audit
-                (transfer_id, old_status, new_status, reason)
-             VALUES ($1, NULL, 'completed', $2)`,
+                (transfer_id, old_status, new_status, reason, actor_user_id, actor_type)
+             VALUES ($1, NULL, 'completed', $2, $3, 'user')`,
             [
                 transfer.id,
                 'Simulated external wallet top-up',
+                lockedWallet.user_id
             ]
         );
 

@@ -40,15 +40,15 @@ All domain and supporting tables use a system-generated `BIGINT` primary key. `j
 
 ### `accounts`
 
-One table represents both user wallets and system accounts. `account_type` identifies `wallet` or `system`; `account_name` identifies a wallet (for example, main or savings) or a system purpose (`cash_in`, `cash_out`, `fee_revenue`). `user_id` is populated only for a wallet. Each account uses INR. The brief says user wallet balances cannot be negative while system accounts may be negative, so the balance constraint applies only to wallets.
+One table represents both user wallets and system accounts. `account_type` identifies `wallet` or `system`; `name` is the human-readable wallet/account name (for example, Main or Savings); `account_name` is the stable internal purpose for system accounts (`cash_in`, `cash_out`, `fee_revenue`). `user_id` is populated only for a wallet. Each account uses INR. The brief says user wallet balances cannot be negative while system accounts may be negative, so the balance constraint applies only to wallets.
 
 | Column | Type | Rules / purpose |
 | --- | --- | --- |
 | `id` | `BIGINT GENERATED ALWAYS AS IDENTITY` | Primary key. |
 | `user_id` | `BIGINT` | Nullable FK to `users`; set for wallets, null for system accounts. |
-| `name` | `TEXT` | Account name (for example, a user's main or savings wallet); required. |
+| `name` | `TEXT` | Required display name for a wallet or system account; defaults to `Wallet` for legacy and direct account inserts. |
 | `account_type` | `TEXT` | `wallet` or `system`. |
-| `account_name` | `TEXT` | Wallet name or the system purpose `cash_in`, `cash_out`, or `fee_revenue`. |
+| `account_name` | `TEXT` | Nullable internal purpose for a system account: `cash_in`, `cash_out`, or `fee_revenue`; null for wallets. |
 | `currency` | `CHAR(3)` | Required, constrained to `INR`. |
 | `balance_paise` | `BIGINT` | Required stored balance, default zero; nonnegative only for wallets. |
 | `created_at` | `TIMESTAMPTZ` | Required creation time, default `now()`. |
@@ -86,12 +86,12 @@ Ledger rows are append-only. PostgreSQL privileges/triggers prevent updates and 
 | Table | Attributes (in addition to generated `id`) | Constraints / relationships |
 | --- | --- | --- |
 | `idempotency_keys` | `user_id`, `idempotency_key`, `request_hash`, `status`, `response_status`, `response_body`, `created_at` | Nullable FK to user; authenticated keys unique (`user_id`, `idempotency_key`); anonymous registration keys unique by `idempotency_key` when `user_id` is null; request hash is SHA-256. |
-| `transfer_status_audit` | `transfer_id`, `old_status`, `new_status`, `actor_user_id`, `changed_at` | FK to transfer; nullable old status for the initial status event; actor identifies a user when a user made the change and may be null for a system actor. |
+| `transfer_status_audit` | `transfer_id`, `old_status`, `new_status`, `actor_user_id`, `actor_type`, `changed_at` | FK to transfer; nullable old status for the initial status event; user and administrator actors are distinguished from system changes. |
 | `risk_rules` | `rule_code`, `description`, `enabled`, `configuration` | Rule code unique; configuration stores the rule's parameters. |
 | `risk_flags` | `transfer_id`, `rule_id`, `decision`, `severity`, `status`, `details`, `created_at`, `resolved_at` | FKs to transfer and rule; decision records held or allowed-with-flag behavior, while status tracks review. |
 | `reconciliation_runs` | `started_at`, `completed_at`, `status`, `accounts_checked`, `problems_found`, `summary` | One row per run. |
 | `reconciliation_problems` | `run_id`, `problem_type`, `account_id`, `transfer_id`, `expected_value`, `actual_value`, `details`, `created_at` | FK to run; links the reported mismatch to the affected record. |
-| `job_locks` | `job_name`, `locked_by`, `locked_at`, `expires_at` | One row per named job; primary key `job_name`. |
+| `job_locks` | `id`, `job_name`, `locked_by`, `locked_at`, `expires_at` | System-generated BIGINT primary key; `job_name` is unique so each scheduled job has one row. |
 
 The brief does not prescribe fraud vocabulary, KYC states, transfer status values, actor type encoding, or exact report count fields. Those values should be documented when the relevant application behavior is implemented, rather than inferred here.
 
@@ -144,11 +144,11 @@ System accounts are `accounts` rows with no user owner. `JOB_LOCKS` is standalon
 
 ## Current implementation comparison
 
-The repository currently has tables for users, accounts, transfers, ledger entries, idempotency keys, transfer status audit, risk rules/flags, reconciliation runs/problems, and migration history. Migration `007_create_job_locks.sql.pending` is not picked up by the runner, which only loads `.sql` files; migration 010 creates the table so a fresh migration run still builds it.
+The repository has tables for users, accounts, transfers, ledger entries, idempotency keys, transfer status audit, risk rules/flags, reconciliation runs/problems, job locks, and migration history. The previous `.sql.pending` job-lock draft is replaced by migration 007 with a generated BIGINT key; migration 010 retains an idempotent fallback for databases that already have the table.
 
-The original schema lacks user phone and KYC status, account names, transfer type and reversal reference, idempotency processing status, an audit actor, and database-enforced ledger immutability. The replacement first migration requires phone and KYC status for new databases. Migration 010 adds them as nullable for already-migrated databases so real legacy user data is not fabricated; those databases need a real data backfill before making them required. Migration 010 adds the remaining columns and integrity rules, and creates named cash-out and fee-revenue accounts. It maps the legacy external-funding account to the cash-in name but retains its legacy `account_type` so the current top-up repository still runs. A future coordinated code change can replace that legacy label with `system`.
+The original schema lacks user phone and KYC status, account names, transfer type and reversal reference, idempotency processing status, an audit actor, and database-enforced ledger immutability. The replacement first migration requires phone and KYC status for new databases. Migration 010 adds them as nullable for already-migrated databases so real legacy user data is not fabricated; those databases need a real data backfill before making them required. Migration 010 adds the remaining columns and integrity rules, and creates named cash-out and fee-revenue accounts. It maps the legacy external-funding account to the cash-in name but retains its legacy `account_type` so the current top-up repository still runs. Migration 016 adds a required display name to every account and backfills system names from their internal account names. A future coordinated code change can replace that legacy label with `system`.
 
-The existing application schema has additional implementation fields such as user `status`/`password_hash`, account `status`, transfer `currency`/`description`/`completed_at`, and audit `reason`; the brief does not require these as separate domain concepts. The current application code does not supply phone or KYC status when creating a user, does not assign wallet names, and does not populate `actor_user_id` on audit rows. Those are application gaps to close before relying on the new fields in live operations. The legacy `external_funding` label also remains in the current schema for compatibility. The migration adds a deferred database check that requires completed transfers to have at least two balanced ledger entries; pending, held and failed transfers can have no ledger lines because they have not moved funds.
+The existing application schema has additional implementation fields such as user `status`/`password_hash`, account `status`, transfer `currency`/`description`/`completed_at`, and audit `reason`; the brief does not require these as separate domain concepts. Registration requires a phone number and sets KYC to the server-controlled `pending` state. Migration 015 backfills missing legacy KYC values to `pending`. User-initiated status changes record `actor_user_id`; administrator decisions record the administrator actor type. The legacy `external_funding` label remains for compatibility. Migration 010 adds a deferred database check that requires completed transfers to have at least two balanced ledger entries; pending, held and failed transfers can have no ledger lines because they have not moved funds.
 
 Migration 011 makes `idempotency_keys.user_id` nullable only to support a public user-registration request, which has no authenticated user ID before the user is created. A partial unique index makes the key unique in that anonymous scope. Authenticated operations continue to use the existing unique (`user_id`, `idempotency_key`) constraint.
 
@@ -165,4 +165,4 @@ A global ledger-total finding and a parentless ledger-entry finding may not have
 
 The `risk_flags` table also stores an optional LLM explanation, its label (`likely_ok`, `review`, or `likely_fraud`), and the explanation timestamp. Review decisions and their timestamps are stored on the same flag. `risk_rules.configuration` stores the amount and velocity settings. The `admin_risk_decisions` table stores request hashes and responses for safe retries. These additions are created by migration `014_milestone5_risk_and_statement_support.sql`.
 
-The peer-transfer velocity check uses the existing `(from_account_id, created_at DESC)` index. The risk queue uses `risk_flags_queue_idx`; the nightly explanation worker uses `risk_flags_explanation_pending_idx`. The source wallet row is locked before the velocity query so concurrent outgoing transfers from that wallet serialize.
+The outgoing velocity check uses the existing `(from_account_id, created_at DESC)` index. It applies to peer transfers and withdrawals; the configured amount rule applies to top-ups, peer transfers, and withdrawals. The risk queue uses `risk_flags_queue_idx`; the nightly explanation worker uses `risk_flags_explanation_pending_idx`. Wallet rows are locked before the velocity query so concurrent outgoing transfers from that wallet serialize. Migration 015 adds an actor category to each transfer status audit row.

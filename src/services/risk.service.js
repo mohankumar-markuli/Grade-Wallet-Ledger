@@ -2,7 +2,11 @@ const pool = require('../config/db');
 
 // Called with the transfer's PostgreSQL transaction client after source and
 // destination accounts have been locked. It performs no network requests.
-async function evaluatePeerTransferRisk(client, { sourceAccountId, amountPaise }) {
+async function evaluateTransferRisk(client, {
+    sourceAccountId,
+    amountPaise,
+    checkVelocity = true
+}) {
     const rules = await client.query(
         `SELECT id, rule_code, description, configuration
          FROM risk_rules WHERE enabled = TRUE ORDER BY id FOR SHARE`
@@ -20,7 +24,7 @@ async function evaluatePeerTransferRisk(client, { sourceAccountId, amountPaise }
                 } });
             }
         }
-        if (rule.rule_code === 'source_transfer_velocity') {
+        if (rule.rule_code === 'source_transfer_velocity' && checkVelocity) {
             const maximum = Number(config.max_transfers);
             const seconds = Number(config.window_seconds);
             if (Number.isInteger(maximum) && maximum > 0 &&
@@ -69,7 +73,7 @@ async function listRiskQueue({ limit = 100 }) {
                 flag.created_at, transfer.id AS transfer_id,
                 transfer.status AS transfer_status, transfer.amount_paise,
                 transfer.from_account_id, transfer.to_account_id,
-                source.user_id AS user_id
+                flag.user_id AS user_id
          FROM risk_flags AS flag
          JOIN transfers AS transfer ON transfer.id = flag.transfer_id
          JOIN accounts AS source ON source.id = transfer.from_account_id
@@ -78,4 +82,9 @@ async function listRiskQueue({ limit = 100 }) {
     )).rows;
 }
 
-module.exports = { evaluatePeerTransferRisk, insertRiskFlags, listRiskQueue };
+module.exports = {
+    evaluateTransferRisk,
+    evaluatePeerTransferRisk: evaluateTransferRisk,
+    insertRiskFlags,
+    listRiskQueue
+};

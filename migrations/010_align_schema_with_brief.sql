@@ -244,9 +244,8 @@ EXECUTE FUNCTION enforce_transfer_balanced_ledger();
 CREATE INDEX IF NOT EXISTS ledger_entries_account_statement_idx
     ON ledger_entries(account_id, created_at DESC, id DESC);
 
--- The prior job-lock draft used a pending suffix and was skipped by the
--- migration runner. Create the table here so the ordered migration set works
--- from an empty database as well as from an existing installation.
+-- Keep this idempotent fallback for installations that applied migration 010
+-- before the pending job-lock draft was promoted to migration 007.
 CREATE TABLE IF NOT EXISTS job_locks (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     job_name VARCHAR(120) NOT NULL UNIQUE,

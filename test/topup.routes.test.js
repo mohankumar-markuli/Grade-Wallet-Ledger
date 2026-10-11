@@ -101,7 +101,7 @@ describe('POST /wallets/:id/top-up', () => {
             .send({ amountPaise: '5000' });
 
         expect(response.status).toBe(400);
-        expect(response.body.error.code).toBe('VALIDATION_ERROR');
+        expect(response.body.code).toBe('VALIDATION_ERROR');
         expect(topUpWallet).not.toHaveBeenCalled();
         expect(getWalletBalance).not.toHaveBeenCalled();
     });
@@ -124,7 +124,7 @@ describe('POST /wallets/:id/top-up', () => {
             .send({ amountPaise: '0' });
 
         expect(response.status).toBe(400);
-        expect(response.body.error.code).toBe('VALIDATION_ERROR');
+        expect(response.body.code).toBe('VALIDATION_ERROR');
     });
 
     test('returns HTTP 404 when the wallet is missing or belongs to another user', async () => {
@@ -137,7 +137,7 @@ describe('POST /wallets/:id/top-up', () => {
             .send({ amountPaise: '5000' });
 
         expect(response.status).toBe(404);
-        expect(response.body.error.code).toBe('WALLET_NOT_FOUND');
+        expect(response.body.code).toBe('WALLET_NOT_FOUND');
         expect(topUpWallet).not.toHaveBeenCalled();
     });
 

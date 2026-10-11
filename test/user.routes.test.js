@@ -27,6 +27,7 @@ describe('POST /users', () => {
             .send({
                 email: ' TEST@EXAMPLE.COM ',
                 fullName: ' Test User ',
+                phone: ' +91 9876543210 ',
                 password: 'correct-horse-battery-staple',
             });
 
@@ -37,6 +38,7 @@ describe('POST /users', () => {
         expect(createUser).toHaveBeenCalledWith({
             email: 'test@example.com',
             fullName: 'Test User',
+            phone: '+91 9876543210',
             password: 'correct-horse-battery-staple',
             idempotencyKey: '03030303-0303-4303-8303-030303030303'
         });
@@ -49,7 +51,7 @@ describe('POST /users', () => {
             .send({ email: 'test@example.com' });
 
         expect(response.status).toBe(400);
-        expect(response.body.error.code).toBe('VALIDATION_ERROR');
+        expect(response.body.code).toBe('VALIDATION_ERROR');
         expect(createUser).not.toHaveBeenCalled();
     });
 
@@ -60,11 +62,12 @@ describe('POST /users', () => {
             .send({
                 email: 'test@example.com',
                 fullName: 'Test User',
+                phone: '+91 9876543210',
                 password: 'short',
             });
 
         expect(response.status).toBe(400);
-        expect(response.body.error.code).toBe('VALIDATION_ERROR');
+        expect(response.body.code).toBe('VALIDATION_ERROR');
         expect(createUser).not.toHaveBeenCalled();
     });
 
@@ -79,10 +82,11 @@ describe('POST /users', () => {
             .send({
                 email: 'test@example.com',
                 fullName: 'Test User',
+                phone: '+91 9876543210',
                 password: 'correct-horse-battery-staple',
             });
 
         expect(response.status).toBe(409);
-        expect(response.body.error.code).toBe('EMAIL_ALREADY_EXISTS');
+        expect(response.body.code).toBe('EMAIL_ALREADY_EXISTS');
     });
 });

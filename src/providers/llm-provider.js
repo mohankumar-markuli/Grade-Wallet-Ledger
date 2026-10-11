@@ -1,14 +1,44 @@
 class MockLlmProvider {
+    constructor({ now = () => new Date(), fixedStatementIntent = null } = {}) {
+        this.now = now;
+        this.fixedStatementIntent = fixedStatementIntent;
+    }
+
     async parseStatementQuestion({question}) {
+        if (this.fixedStatementIntent) {
+            return structuredClone(this.fixedStatementIntent);
+        }
         const text=String(question||'').toLowerCase();
         const dates=text.match(/\b20\d{2}-\d{2}-\d{2}\b/g)||[];
+        let from = dates[0] || null;
+        let to = dates[1] || dates[0] || null;
+        const monthNames = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+        const monthMatch = text.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(20\d{2})\b/);
+        if (!from && monthMatch) {
+            const month = monthNames.indexOf(monthMatch[1]);
+            const year = Number(monthMatch[2]);
+            from = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
+            to = new Date(Date.UTC(year, month + 1, 0)).toISOString().slice(0, 10);
+        } else if (!from && /\blast month\b/.test(text)) {
+            const today = this.now();
+            const year = today.getUTCFullYear();
+            const month = today.getUTCMonth();
+            from = new Date(Date.UTC(year, month - 1, 1)).toISOString().slice(0, 10);
+            to = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+        } else if (!from && /\bthis month\b/.test(text)) {
+            const today = this.now();
+            const year = today.getUTCFullYear();
+            const month = today.getUTCMonth();
+            from = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
+            to = new Date(Date.UTC(year, month + 1, 0)).toISOString().slice(0, 10);
+        }
         let type='unsupported';
         if(/largest|biggest|highest/.test(text)) type='largest_transfer';
         else if(/how many|number of|count/.test(text)) type='transfer_count';
         else if(/received|got from/.test(text)) type='total_received';
         else if(/sent|paid|transfer to/.test(text)) type='total_sent';
-        const person=text.match(/(?:to|from)\s+([a-z][a-z .'-]{0,79}?)(?=\s+(?:between|during|in|on|for)\b|[,?.]|$)/i);
-        return {type,counterparty:person?person[1].trim():null,from:dates[0]||null,to:dates[1]||dates[0]||null};
+        const person=text.match(/(?:to|from)\s+([a-z][a-z .'-]{0,79}?)(?=\s+(?:between|during|in|on|for|last month|this month)\b|[,?.]|$)/i);
+        return {type,counterparty:person?person[1].trim():null,from,to};
     }
     async explainRisk(){return {explanation:'A configured fraud rule matched this transfer. Review the recent transfer history.',label:'review'};}
 }
@@ -58,6 +88,12 @@ class OpenAiLlmProvider {
 }
 
 function createLlmProvider(){
-    return process.env.OPENAI_API_KEY?new OpenAiLlmProvider():new MockLlmProvider();
+    const selected = process.env.LLM_PROVIDER;
+    if (selected === 'mock') return new MockLlmProvider();
+    if (selected === 'openai') return new OpenAiLlmProvider();
+    if (selected !== undefined && selected !== '') {
+        throw new Error('LLM_PROVIDER must be mock or openai.');
+    }
+    return new MockLlmProvider();
 }
 module.exports={MockLlmProvider,OpenAiLlmProvider,createLlmProvider};

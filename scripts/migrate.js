@@ -9,6 +9,16 @@ async function migrate() {
     const client = await pool.connect();
 
     try {
+        const expectedDatabase = process.env.MIGRATION_EXPECTED_DATABASE;
+        if (!expectedDatabase) {
+            throw new Error('Set MIGRATION_EXPECTED_DATABASE to the exact database name after verifying the target.');
+        }
+        const database = await client.query('SELECT current_database() AS name');
+        if (database.rows[0].name !== expectedDatabase) {
+            throw new Error(`Database mismatch: expected ${expectedDatabase}, received ${database.rows[0].name}. No migration was run.`);
+        }
+        console.log(`Verified migration target: ${database.rows[0].name}`);
+
         await client.query(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
         filename TEXT PRIMARY KEY,

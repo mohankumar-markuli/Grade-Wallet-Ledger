@@ -289,9 +289,9 @@ async function transferBetweenWallets({
             }));
             await client.query(
                 `INSERT INTO transfer_status_audit
-                    (transfer_id, old_status, new_status, reason)
-                 VALUES ($1, NULL, 'held', 'Configured fraud rule matched')`,
-                [transfer.id]
+                    (transfer_id, old_status, new_status, reason, actor_user_id, actor_type)
+                 VALUES ($1, NULL, 'held', 'Configured fraud rule matched', $2, 'user')`,
+                [transfer.id, source.user_id]
             );
             await client.query(
                 `UPDATE idempotency_keys
@@ -359,9 +359,9 @@ async function transferBetweenWallets({
 
         await client.query(
             `INSERT INTO transfer_status_audit
-                (transfer_id, old_status, new_status, reason)
-             VALUES ($1, NULL, 'completed', $2)`,
-            [transfer.id, 'Wallet-to-wallet transfer']
+                (transfer_id, old_status, new_status, reason, actor_user_id, actor_type)
+             VALUES ($1, NULL, 'completed', $2, $3, 'user')`,
+            [transfer.id, 'Wallet-to-wallet transfer', source.user_id]
         );
 
         await client.query(

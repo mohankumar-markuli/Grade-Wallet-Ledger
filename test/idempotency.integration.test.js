@@ -55,6 +55,7 @@ describe('Idempotency PostgreSQL acceptance tests', () => {
         const signupRequest = {
             email: `idempotency-a-${crypto.randomUUID()}@example.test`,
             fullName: 'Idempotency Test A',
+            phone: `+91${Date.now()}11`,
             password: 'correct-horse-battery-staple',
             idempotencyKey: signupKey
         };

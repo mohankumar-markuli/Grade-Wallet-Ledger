@@ -60,9 +60,9 @@ The cleanup command completed and removed the benchmark fixture from wallet_test
 
 ## Local commands
 
-Before applying migration 012, run a database-name check using the same DATABASE_URL that the migration command will load. Continue only if it prints wallet_test_db. Then run:
+Run the guarded test-database migration command:
 
-    npm.cmd run migrate
+    npm.cmd run migrate:test
 
 Run the focused acceptance and route/scheduler tests:
 

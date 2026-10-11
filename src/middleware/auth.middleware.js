@@ -9,7 +9,7 @@ function authenticateToken(req, res, next) {
         !authorizationHeader.startsWith('Bearer ')
     ) {
         return res.status(401).json({
-            error: 'Authentication token is required',
+            error: { code: 'AUTHENTICATION_REQUIRED', message: 'Authentication token is required.' },
         });
     }
 
@@ -17,7 +17,7 @@ function authenticateToken(req, res, next) {
 
     if (!token) {
         return res.status(401).json({
-            error: 'Authentication token is required',
+            error: { code: 'AUTHENTICATION_REQUIRED', message: 'Authentication token is required.' },
         });
     }
 
@@ -25,7 +25,7 @@ function authenticateToken(req, res, next) {
 
     if (!secret) {
         return res.status(500).json({
-            error: 'Authentication configuration error',
+            error: { code: 'AUTHENTICATION_UNAVAILABLE', message: 'Authentication configuration error.' },
         });
     }
 
@@ -37,7 +37,7 @@ function authenticateToken(req, res, next) {
 
         if (!decoded.sub) {
             return res.status(401).json({
-                error: 'Invalid or expired authentication token',
+                error: { code: 'INVALID_AUTHENTICATION', message: 'Invalid or expired authentication token.' },
             });
         }
 
@@ -49,7 +49,7 @@ function authenticateToken(req, res, next) {
         return next();
     } catch (error) {
         return res.status(401).json({
-            error: 'Invalid or expired authentication token',
+            error: { code: 'INVALID_AUTHENTICATION', message: 'Invalid or expired authentication token.' },
         });
     }
 }

@@ -398,7 +398,7 @@ async function runReconciliation({
                 await client.query('COMMIT');
                 transactionStarted = false;
                 return {
-                    status: 200,
+                    status: 202,
                     body: previous.response_body,
                     replayed: true
                 };
@@ -463,7 +463,7 @@ async function runReconciliation({
         await client.query('COMMIT');
         transactionStarted = false;
 
-        return { status: 200, body: responseBody, replayed: false };
+        return { status: 202, body: responseBody, replayed: false };
     } catch (error) {
         if (transactionStarted) {
             try {

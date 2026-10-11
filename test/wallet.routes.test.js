@@ -47,6 +47,7 @@ describe('Wallet routes', () => {
                 id: '20',
                 user_id: '10',
                 account_type: 'wallet',
+                name: 'Main',
                 currency: 'INR',
                 balance_paise: '0',
                 status: 'active',
@@ -57,18 +58,32 @@ describe('Wallet routes', () => {
                 .post('/wallets')
                 .set('Authorization', `Bearer ${createToken('10')}`)
                 .set('Idempotency-Key', '01010101-0101-4101-8101-010101010101')
-                .send({ userId: '999' });
+                .send({ userId: '999', name: 'Main' });
 
             expect(response.status).toBe(201);
             expect(response.body.data.account_type).toBe('wallet');
             expect(response.body.data.currency).toBe('INR');
+            expect(response.body.data.name).toBe('Main');
             expect(response.body.data.balance_paise).toBe('0');
 
             // The request body cannot choose the wallet owner.
             expect(createWallet).toHaveBeenCalledWith({
                 userId: '10',
+                name: 'Main',
                 idempotencyKey: '01010101-0101-4101-8101-010101010101'
             });
+        });
+
+        test('rejects a blank wallet name', async () => {
+            const response = await request(app)
+                .post('/wallets')
+                .set('Authorization', `Bearer ${createToken('10')}`)
+                .set('Idempotency-Key', '01010101-0101-4101-8101-010101010102')
+                .send({ name: '   ' });
+
+            expect(response.status).toBe(400);
+            expect(response.body.code).toBe('VALIDATION_ERROR');
+            expect(createWallet).not.toHaveBeenCalled();
         });
 
         test('rejects a request without authentication', async () => {
@@ -92,7 +107,7 @@ describe('Wallet routes', () => {
                 .send({});
 
             expect(response.status).toBe(404);
-            expect(response.body.error.code).toBe('USER_NOT_FOUND');
+            expect(response.body.code).toBe('USER_NOT_FOUND');
         });
     });
 
@@ -124,7 +139,7 @@ describe('Wallet routes', () => {
                 .set('Authorization', `Bearer ${createToken('10')}`);
 
             expect(response.status).toBe(400);
-            expect(response.body.error.code).toBe('VALIDATION_ERROR');
+            expect(response.body.code).toBe('VALIDATION_ERROR');
             expect(getWalletBalance).not.toHaveBeenCalled();
         });
 
@@ -137,7 +152,7 @@ describe('Wallet routes', () => {
                 .set('Authorization', `Bearer ${createToken('10')}`);
 
             expect(response.status).toBe(404);
-            expect(response.body.error.code).toBe('WALLET_NOT_FOUND');
+            expect(response.body.code).toBe('WALLET_NOT_FOUND');
             expect(getWalletBalance).toHaveBeenCalledWith({
                 walletId: '1',
                 userId: '10',

@@ -12,10 +12,11 @@ function idempotencyError(message, status, code) {
     return Object.assign(new Error(message), { status, code });
 }
 
-async function createWallet({ userId, idempotencyKey }) {
+async function createWallet({ userId, name = 'Wallet', idempotencyKey }) {
     const requestHash = hashRequest({
         operation: 'wallet-create',
-        userId: String(userId)
+        userId: String(userId),
+        name
     });
     const client = await pool.connect();
 
@@ -62,11 +63,11 @@ async function createWallet({ userId, idempotencyKey }) {
         }
 
         const walletResult = await client.query(
-            `INSERT INTO accounts (user_id, account_type)
-             VALUES ($1, 'wallet')
+            `INSERT INTO accounts (user_id, account_type, name)
+             VALUES ($1, 'wallet', $2)
              RETURNING id, user_id, account_type, currency,
-                       balance_paise, status, created_at`,
-            [userId]
+                       balance_paise, status, name, created_at`,
+            [userId, name]
         );
         const wallet = walletResult.rows[0];
 

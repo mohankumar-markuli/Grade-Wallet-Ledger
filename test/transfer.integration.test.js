@@ -147,23 +147,27 @@ describe('Wallet transfer PostgreSQL integration', () => {
         await removeAbandonedTransferFixtures();
 
         const userAResult = await pool.query(
-            `INSERT INTO users (email, full_name)
-             VALUES ($1, $2)
+            `INSERT INTO users (email, full_name, phone, kyc_status)
+             VALUES ($1, $2, $3, $4)
              RETURNING id`,
             [
                 `transfer-a-${crypto.randomUUID()}@example.test`,
-                'Transfer Integration A'
+                'Transfer Integration A',
+                `+91${Date.now()}51`,
+                'pending'
             ]
         );
         userA = userAResult.rows[0].id;
 
         const userBResult = await pool.query(
-            `INSERT INTO users (email, full_name)
-             VALUES ($1, $2)
+            `INSERT INTO users (email, full_name, phone, kyc_status)
+             VALUES ($1, $2, $3, $4)
              RETURNING id`,
             [
                 `transfer-b-${crypto.randomUUID()}@example.test`,
-                'Transfer Integration B'
+                'Transfer Integration B',
+                `+91${Date.now()}52`,
+                'pending'
             ]
         );
         userB = userBResult.rows[0].id;
