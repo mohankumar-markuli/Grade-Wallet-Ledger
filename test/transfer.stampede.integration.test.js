@@ -20,11 +20,58 @@ const {
 
 jest.setTimeout(120000);
 
+async function removeAbandonedStampedeFixtures() {
+    const client = await pool.connect();
+    let transactionStarted = false;
+    try {
+        const database = await client.query('SELECT current_database() AS name');
+        if (database.rows[0].name !== 'wallet_test_db') {
+            throw new Error('Safety check failed: stampede fixtures may only be removed from wallet_test_db.');
+        }
+        await client.query('BEGIN');
+        transactionStarted = true;
+        const users = await client.query(
+            `SELECT id FROM users
+             WHERE email LIKE 'stampede-a-%@example.test'
+                OR email LIKE 'stampede-b-%@example.test'`
+        );
+        const userIds = users.rows.map(row => String(row.id));
+        if (userIds.length) {
+            const accounts = await client.query(
+                `SELECT id FROM accounts
+                 WHERE user_id=ANY($1::bigint[]) AND account_type='wallet'`,
+                [userIds]
+            );
+            const accountIds = accounts.rows.map(row => String(row.id));
+            await client.query('ALTER TABLE ledger_entries DISABLE TRIGGER ledger_entries_append_only');
+            await client.query('DELETE FROM idempotency_keys WHERE user_id=ANY($1::bigint[])', [userIds]);
+            if (accountIds.length) {
+                const transferIds = `SELECT id FROM transfers WHERE from_account_id=ANY($1::bigint[]) OR to_account_id=ANY($1::bigint[])`;
+                await client.query(`DELETE FROM ledger_entries WHERE transfer_id IN (${transferIds})`, [accountIds]);
+                await client.query(`DELETE FROM transfer_status_audit WHERE transfer_id IN (${transferIds})`, [accountIds]);
+                await client.query(`DELETE FROM risk_flags WHERE transfer_id IN (${transferIds})`, [accountIds]);
+                await client.query(`DELETE FROM transfers WHERE id IN (${transferIds})`, [accountIds]);
+                await client.query('DELETE FROM accounts WHERE id=ANY($1::bigint[])', [accountIds]);
+            }
+            await client.query('DELETE FROM users WHERE id=ANY($1::bigint[])', [userIds]);
+            await client.query('ALTER TABLE ledger_entries ENABLE TRIGGER ledger_entries_append_only');
+        }
+        await client.query('COMMIT');
+        transactionStarted = false;
+    } catch (error) {
+        if (transactionStarted) await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
 describe('wallet transfer stampede acceptance test', () => {
     let userA;
     let userB;
     const walletPairs = [];
     const walletIds = [];
+    let originalVelocityRuleEnabled;
 
     beforeAll(async () => {
         const databaseResult = await pool.query(
@@ -36,6 +83,18 @@ describe('wallet transfer stampede acceptance test', () => {
                 'Safety check failed: stampede tests must use wallet_test_db.'
             );
         }
+
+        const velocityRule = await pool.query(
+            "SELECT enabled FROM risk_rules WHERE rule_code='source_transfer_velocity'"
+        );
+        originalVelocityRuleEnabled = velocityRule.rows[0]?.enabled;
+        if (originalVelocityRuleEnabled !== undefined) {
+            await pool.query(
+                "UPDATE risk_rules SET enabled=FALSE WHERE rule_code='source_transfer_velocity'"
+            );
+        }
+
+        await removeAbandonedStampedeFixtures();
 
         const userAResult = await pool.query(
             `INSERT INTO users (email, full_name, phone, kyc_status)
@@ -140,6 +199,16 @@ describe('wallet transfer stampede acceptance test', () => {
                 );
 
                 await cleanupClient.query(
+                    `DELETE FROM risk_flags
+                     WHERE transfer_id IN (
+                         SELECT id FROM transfers
+                         WHERE from_account_id = ANY($1::bigint[])
+                            OR to_account_id = ANY($1::bigint[])
+                     )`,
+                    [walletIds]
+                );
+
+                await cleanupClient.query(
                     `DELETE FROM transfers
                      WHERE from_account_id = ANY($1::bigint[])
                         OR to_account_id = ANY($1::bigint[])`,
@@ -168,8 +237,17 @@ describe('wallet transfer stampede acceptance test', () => {
                     await cleanupClient.query('ROLLBACK');
                 }
             } finally {
-                cleanupClient.release();
-                await pool.end();
+                try {
+                    if (originalVelocityRuleEnabled !== undefined) {
+                        await cleanupClient.query(
+                            "UPDATE risk_rules SET enabled=$1 WHERE rule_code='source_transfer_velocity'",
+                            [originalVelocityRuleEnabled]
+                        );
+                    }
+                } finally {
+                    cleanupClient.release();
+                    await pool.end();
+                }
             }
         }
     });

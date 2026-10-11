@@ -1,6 +1,7 @@
 
 const crypto = require('node:crypto');
 const pool = require('../config/db');
+const { evaluatePeerTransferRisk, insertRiskFlags } = require('../services/risk.service');
 
 const MAX_BIGINT = 9223372036854775807n;
 
@@ -61,7 +62,9 @@ async function transferBetweenWallets({
     toWalletId,
     userId,
     amountPaise,
-    idempotencyKey
+    idempotencyKey,
+    transferType = 'peer_transfer',
+    originalTransferId = null
 }) {
     if (
         !/^[1-9]\d*$/.test(String(fromWalletId)) ||
@@ -176,6 +179,8 @@ async function transferBetweenWallets({
             .createHash('sha256')
             .update(JSON.stringify({
                 operation: 'wallet-transfer',
+                transferType,
+                originalTransferId: originalTransferId === null ? null : String(originalTransferId),
                 fromWalletId: String(source.id),
                 toWalletId: String(destination.id),
                 amountPaise: amount
@@ -238,19 +243,65 @@ async function transferBetweenWallets({
             );
         }
 
+        const riskStartedAt = process.hrtime.bigint();
+        const riskFindings = await evaluatePeerTransferRisk(client, {
+            sourceAccountId: source.id,
+            amountPaise: amount
+        });
+        const riskEvaluationMs = Number(process.hrtime.bigint() - riskStartedAt) / 1e6;
+        const held = riskFindings.some(({ rule }) => rule.configuration?.action === 'hold');
+
         const transferResult = await client.query(
             `INSERT INTO transfers
                 (from_account_id, to_account_id, amount_paise,
-                 currency, status, description, completed_at)
-             VALUES ($1, $2, $3, 'INR', 'completed',
-                     'Wallet-to-wallet transfer', NOW())
+                 currency, status, description, completed_at,
+                 transfer_type, original_transfer_id)
+             VALUES ($1, $2, $3, 'INR', $4,
+                     'Wallet-to-wallet transfer', $5,
+                     $6, $7)
              RETURNING id, from_account_id, to_account_id,
                        amount_paise, currency, status,
                        created_at, completed_at`,
-            [source.id, destination.id, amount]
+            [source.id, destination.id, amount, held ? 'held' : 'completed',
+                held ? null : new Date(), transferType, originalTransferId]
         );
 
         const transfer = transferResult.rows[0];
+
+        if (riskFindings.length > 0) {
+            await insertRiskFlags(client, {
+                userId: source.user_id,
+                accountId: source.id,
+                transferId: transfer.id,
+                findings: riskFindings,
+                held
+            });
+        }
+
+        if (held) {
+            const responseBody = JSON.parse(JSON.stringify({
+                data: {
+                    transfer,
+                    held: true,
+                    message: 'Transfer held for administrator review.',
+                    riskEvaluationMs
+                }
+            }));
+            await client.query(
+                `INSERT INTO transfer_status_audit
+                    (transfer_id, old_status, new_status, reason)
+                 VALUES ($1, NULL, 'held', 'Configured fraud rule matched')`,
+                [transfer.id]
+            );
+            await client.query(
+                `UPDATE idempotency_keys
+                 SET response_status = 202, response_body = $1::jsonb, transfer_id = $2
+                 WHERE user_id = $3 AND idempotency_key = $4`,
+                [JSON.stringify(responseBody), transfer.id, source.user_id, key]
+            );
+            await client.query('COMMIT');
+            return { status: 202, body: responseBody, replayed: false };
+        }
 
         await client.query(
             `INSERT INTO ledger_entries
@@ -300,7 +351,9 @@ async function transferBetweenWallets({
             data: {
                 transfer,
                 sourceWallet: updatedSource.rows[0],
-                destinationWallet: updatedDestination.rows[0]
+                destinationWallet: updatedDestination.rows[0],
+                riskEvaluationMs,
+                flagged: riskFindings.length > 0
             }
         }));
 

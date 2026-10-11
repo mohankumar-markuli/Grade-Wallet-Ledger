@@ -80,6 +80,10 @@ async function removeAbandonedTransferFixtures() {
                     [accountIds]
                 );
                 await client.query(
+                    `DELETE FROM risk_flags WHERE transfer_id IN (${relatedTransfers})`,
+                    [accountIds]
+                );
+                await client.query(
                     `DELETE FROM transfers WHERE id IN (${relatedTransfers})`,
                     [accountIds]
                 );
@@ -117,6 +121,7 @@ describe('Wallet transfer PostgreSQL integration', () => {
     let userB;
     let walletA;
     let walletB;
+    let originalVelocityRuleEnabled;
 
     beforeAll(async () => {
         const databaseResult = await pool.query(
@@ -126,6 +131,16 @@ describe('Wallet transfer PostgreSQL integration', () => {
         if (databaseResult.rows[0].name !== 'wallet_test_db') {
             throw new Error(
                 'Safety check failed: integration tests must use wallet_test_db.'
+            );
+        }
+
+        const velocityRule = await pool.query(
+            "SELECT enabled FROM risk_rules WHERE rule_code='source_transfer_velocity'"
+        );
+        originalVelocityRuleEnabled = velocityRule.rows[0]?.enabled;
+        if (originalVelocityRuleEnabled !== undefined) {
+            await pool.query(
+                "UPDATE risk_rules SET enabled=FALSE WHERE rule_code='source_transfer_velocity'"
             );
         }
 
@@ -243,6 +258,16 @@ describe('Wallet transfer PostgreSQL integration', () => {
                 );
 
                 await cleanupClient.query(
+                    `DELETE FROM risk_flags
+                     WHERE transfer_id IN (
+                         SELECT id FROM transfers
+                         WHERE from_account_id = ANY($1::bigint[])
+                            OR to_account_id = ANY($1::bigint[])
+                     )`,
+                    [[String(walletA), String(walletB)]]
+                );
+
+                await cleanupClient.query(
                     `DELETE FROM transfers
                      WHERE from_account_id = ANY($1::bigint[])
                         OR to_account_id = ANY($1::bigint[])`,
@@ -273,8 +298,17 @@ describe('Wallet transfer PostgreSQL integration', () => {
                     await cleanupClient.query('ROLLBACK');
                 }
             } finally {
-                cleanupClient.release();
-                await pool.end();
+                try {
+                    if (originalVelocityRuleEnabled !== undefined) {
+                        await cleanupClient.query(
+                            "UPDATE risk_rules SET enabled=$1 WHERE rule_code='source_transfer_velocity'",
+                            [originalVelocityRuleEnabled]
+                        );
+                    }
+                } finally {
+                    cleanupClient.release();
+                    await pool.end();
+                }
             }
         }
     });

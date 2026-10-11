@@ -161,3 +161,8 @@ Migration 012 adds an idempotency key, SHA-256 request hash, and saved response 
 The same migration seeds the nightly_reconciliation row in job_locks. The application holds this row with SELECT FOR UPDATE NOWAIT inside the Repeatable Read report transaction; transaction row locking is the exclusion mechanism, not the descriptive expiry value.
 
 A global ledger-total finding and a parentless ledger-entry finding may not have a valid account or transfer ID. Migration 012 therefore permits those two problem types to have null subject references. All other report findings identify their account or transfer.
+## Milestone 5 additions
+
+The `risk_flags` table also stores an optional LLM explanation, its label (`likely_ok`, `review`, or `likely_fraud`), and the explanation timestamp. Review decisions and their timestamps are stored on the same flag. `risk_rules.configuration` stores the amount and velocity settings. The `admin_risk_decisions` table stores request hashes and responses for safe retries. These additions are created by migration `014_milestone5_risk_and_statement_support.sql`.
+
+The peer-transfer velocity check uses the existing `(from_account_id, created_at DESC)` index. The risk queue uses `risk_flags_queue_idx`; the nightly explanation worker uses `risk_flags_explanation_pending_idx`. The source wallet row is locked before the velocity query so concurrent outgoing transfers from that wallet serialize.
