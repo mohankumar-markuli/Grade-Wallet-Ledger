@@ -55,12 +55,14 @@ describe('Top-up PostgreSQL integration', () => {
         originalFundingBalance = BigInt(funding.rows[0].balance_paise);
 
         const user = await pool.query(
-            `INSERT INTO users (email, full_name)
-             VALUES ($1, $2)
+            `INSERT INTO users (email, full_name, phone, kyc_status)
+             VALUES ($1, $2, $3, $4)
              RETURNING id`,
             [
                 `topup-integration-${crypto.randomUUID()}@example.test`,
                 'Top-up Integration Test',
+                `+91${Date.now()}41`,
+                'pending',
             ]
         );
 

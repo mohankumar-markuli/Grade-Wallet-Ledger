@@ -132,6 +132,7 @@ Fraud rules and Q&A behavior are in [`docs/milestone5.md`](docs/milestone5.md).
 The 10 sample statement questions and expected fixture answers are in
 [`docs/milestone5.md`](docs/milestone5.md). Reconciliation findings and
 benchmark notes are in [`docs/reconciliation.md`](docs/reconciliation.md).
+The 5-minute video presentation steps and cURL script are in [`docs/video-demo-guide.md`](docs/video-demo-guide.md).
 
 ## Assumptions and limits
 
