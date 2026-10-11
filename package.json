@@ -1,16 +1,23 @@
 {
   "name": "grade-wallet-ledger",
   "version": "1.0.0",
-  "description": "backend of a digital wallet - sits behind every UPI or payments app.",
-  "main": "index.js",
+  "description": "Digital wallet backend with a double-entry ledger and PostgreSQL.",
+  "main": "src/app.js",
   "directories": {
     "doc": "docs",
     "test": "test"
   },
   "scripts": {
-    "test": "node -r dotenv/config ./node_modules/jest/bin/jest.js --runInBand",
+    "start": "node src/server.js",
+    "test": "node scripts/test.js",
     "dev": "nodemon src/server.js",
-    "migrate": "node scripts/migrate.js"
+    "migrate": "node scripts/migrate.js",
+    "migrate:test": "node scripts/migrate-test.js",
+    "seed": "node scripts/seed.js",
+    "worker": "node src/worker.js"
+  },
+  "jest": {
+    "roots": ["<rootDir>/test"]
   },
   "repository": {
     "type": "git",
@@ -20,6 +27,9 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
   "bugs": {
     "url": "https://github.com/mohankumar-markuli/Grade-Wallet-Ledger/issues"
   },

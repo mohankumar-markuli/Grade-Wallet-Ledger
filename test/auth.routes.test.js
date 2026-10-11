@@ -1,5 +1,4 @@
 
-const express = require('express');
 const request = require('supertest');
 
 jest.mock('../src/repositories/user.repository', () => ({
@@ -17,16 +16,7 @@ jest.mock('jsonwebtoken', () => ({
 const { findUserByEmail } = require('../src/repositories/user.repository');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const authRoutes = require('../src/routes/auth.routes');
-
-const app = express();
-app.use(express.json());
-app.use('/auth', authRoutes);
-
-// Pass unexpected errors to a test-friendly error handler.
-app.use((error, req, res, next) => {
-    res.status(500).json({ error: error.message });
-});
+const app = require('../src/app');
 
 describe('POST /auth/login', () => {
     beforeEach(() => {
@@ -52,6 +42,7 @@ describe('POST /auth/login', () => {
 
         const response = await request(app)
             .post('/auth/login')
+            .set('Idempotency-Key', '10000000-0000-4000-8000-000000000010')
             .send({
                 email: ' USER@EXAMPLE.COM ',
                 password: 'correct-password',
@@ -84,13 +75,15 @@ describe('POST /auth/login', () => {
 
         const response = await request(app)
             .post('/auth/login')
+            .set('Idempotency-Key', '10000000-0000-4000-8000-000000000010')
             .send({
                 email: 'unknown@example.com',
                 password: 'some-password',
             });
 
         expect(response.status).toBe(401);
-        expect(response.body.error).toBe('Invalid email or password');
+        expect(response.body.code).toBe('AUTHENTICATION_FAILED');
+        expect(response.body.message).toBe('Invalid email or password.');
         expect(bcrypt.compare).not.toHaveBeenCalled();
     });
 
@@ -107,13 +100,15 @@ describe('POST /auth/login', () => {
 
         const response = await request(app)
             .post('/auth/login')
+            .set('Idempotency-Key', '10000000-0000-4000-8000-000000000010')
             .send({
                 email: 'user@example.com',
                 password: 'wrong-password',
             });
 
         expect(response.status).toBe(401);
-        expect(response.body.error).toBe('Invalid email or password');
+        expect(response.body.code).toBe('AUTHENTICATION_FAILED');
+        expect(response.body.message).toBe('Invalid email or password.');
         expect(jwt.sign).not.toHaveBeenCalled();
     });
 
@@ -128,6 +123,7 @@ describe('POST /auth/login', () => {
 
         const response = await request(app)
             .post('/auth/login')
+            .set('Idempotency-Key', '10000000-0000-4000-8000-000000000010')
             .send({
                 email: 'user@example.com',
                 password: 'some-password',
@@ -150,19 +146,22 @@ describe('POST /auth/login', () => {
 
         const response = await request(app)
             .post('/auth/login')
+            .set('Idempotency-Key', '10000000-0000-4000-8000-000000000010')
             .send({
                 email: 'user@example.com',
                 password: 'correct-password',
             });
 
         expect(response.status).toBe(403);
-        expect(response.body.error).toBe('Account is not active');
+        expect(response.body.code).toBe('USER_NOT_ACTIVE');
+        expect(response.body.message).toBe('Account is not active.');
         expect(jwt.sign).not.toHaveBeenCalled();
     });
 
     test('rejects a request with missing credentials', async () => {
         const response = await request(app)
             .post('/auth/login')
+            .set('Idempotency-Key', '10000000-0000-4000-8000-000000000010')
             .send({ email: 'user@example.com' });
 
         expect(response.status).toBe(400);

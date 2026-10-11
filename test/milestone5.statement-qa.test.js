@@ -7,6 +7,7 @@ jest.mock('../src/config/db', () => ({
 
 delete process.env.OPENAI_API_KEY;
 const { answerStatementQuestion, validateIntent } = require('../src/services/statement-qa.service');
+const { MockLlmProvider } = require('../src/providers/llm-provider');
 
 describe('Milestone 5 statement question safety', () => {
     beforeEach(() => {
@@ -22,6 +23,17 @@ describe('Milestone 5 statement question safety', () => {
     test('rejects an unsupported type and malformed date intent', () => {
         expect(validateIntent({ type: 'show_all_users', counterparty: null, from: null, to: null })).toBeNull();
         expect(validateIntent({ type: 'transfer_count', counterparty: null, from: '2026-02-30', to: null })).toBeNull();
+    });
+
+    test('mock provider can return a fixed, deterministic intent object', async () => {
+        const fixedIntent = {
+            type: 'total_sent',
+            counterparty: 'Rahul',
+            from: '2026-08-01',
+            to: '2026-08-31'
+        };
+        const mock = new MockLlmProvider({ fixedStatementIntent: fixedIntent });
+        expect(await mock.parseStatementQuestion({ question: 'arbitrary question' })).toEqual(fixedIntent);
     });
 
     test('keeps a prompt-injected count question scoped to the authenticated user', async () => {

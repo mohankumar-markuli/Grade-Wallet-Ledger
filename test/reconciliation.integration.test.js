@@ -330,7 +330,7 @@ describe('reconciliation PostgreSQL acceptance test', () => {
         });
         runId = result.body.data.runId;
 
-        expect(result.status).toBe(200);
+        expect(result.status).toBe(202);
         expect(result.body.data.checks.globalDebitsEqualCredits).toBe(false);
         expect(result.body.data.checks.transfersBalanced).toBe(false);
         expect(result.body.data.checks.storedBalancesMatchLedger).toBe(false);

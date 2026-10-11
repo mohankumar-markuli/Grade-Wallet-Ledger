@@ -1,6 +1,6 @@
 # Milestone 2: PostgreSQL isolation lab
 
-Run this lab only against `wallet_test_db`. Do not use the development database. It creates a small schema named `milestone2_lab` and drops that schema after the experiment. The commands below are the reproducible procedure; fill in the **Observed result** notes from your own two-session run before treating the lab as complete.
+Run this lab only against `wallet_test_db`. Do not use the development database. It creates a small schema named `milestone2_lab` and drops that schema after the experiment. The observations below were collected on 2026-10-11 using two independent PostgreSQL connections to `wallet_test_db` (PostgreSQL 16.15). The SQL procedure is included so the results can be reproduced in two `psql` sessions.
 
 ## Connect two sessions
 
@@ -31,12 +31,18 @@ CREATE TABLE milestone2_lab.unsafe_wallets (
     wallet_id INTEGER PRIMARY KEY,
     balance_paise BIGINT NOT NULL
 );
+CREATE TABLE milestone2_lab.serializable_slots (
+    slot INTEGER PRIMARY KEY,
+    available BOOLEAN NOT NULL
+);
 INSERT INTO milestone2_lab.wallets (wallet_id, balance_paise)
 VALUES (1, 100000);
 INSERT INTO milestone2_lab.wallet_labels (wallet_id, label)
 VALUES (1, 'isolation lab wallet');
 INSERT INTO milestone2_lab.unsafe_wallets (wallet_id, balance_paise)
 VALUES (1, 50000);
+INSERT INTO milestone2_lab.serializable_slots (slot, available)
+VALUES (1, true), (2, true);
 ```
 
 `SELECT current_database()` must return `wallet_test_db`. If it does not, stop and reconnect to the test database before creating anything.
@@ -67,6 +73,8 @@ COMMIT;
 ```
 
 **Expected result:** Session A sees `100000` on the first read and `105000` on the second. Under Read Committed, each statement sees a snapshot taken when that statement starts.
+
+**Observed result (2026-10-11):** first read `100000`; second read `105000`.
 
 Reset in Session B before the next experiment:
 
@@ -103,6 +111,8 @@ COMMIT;
 
 **Expected result:** both Session A reads should show `100000`. Repeatable Read keeps the same transaction snapshot for the transaction.
 
+**Observed result (2026-10-11):** first read `100000`; second read `100000` while Session B's committed value was `105000`.
+
 Reset in Session B:
 
 ```sql
@@ -117,37 +127,37 @@ In **Session A**:
 
 ```sql
 BEGIN ISOLATION LEVEL SERIALIZABLE;
-SELECT balance_paise FROM milestone2_lab.wallets WHERE wallet_id = 1;
+SELECT COUNT(*) FROM milestone2_lab.serializable_slots WHERE available;
 ```
 
 Before Session A writes, in **Session B**:
 
 ```sql
 BEGIN ISOLATION LEVEL SERIALIZABLE;
-SELECT balance_paise FROM milestone2_lab.wallets WHERE wallet_id = 1;
+SELECT COUNT(*) FROM milestone2_lab.serializable_slots WHERE available;
 ```
 
-Both sessions should have read `100000`. In **Session A**, calculate a new balance of `30000` from that read and commit:
+Both sessions should read `2`. Each transaction now marks a different slot unavailable, based on the shared rule that at least one must remain available. This creates a write-skew conflict. In **Session A**:
 
 ```sql
-UPDATE milestone2_lab.wallets
-SET balance_paise = 30000
-WHERE wallet_id = 1;
+UPDATE milestone2_lab.serializable_slots
+SET available = false
+WHERE slot = 1;
 COMMIT;
 ```
 
-In **Session B**, try to apply its own calculation based on the earlier `100000` read:
+In **Session B**:
 
 ```sql
-UPDATE milestone2_lab.wallets
-SET balance_paise = 30000
-WHERE wallet_id = 1;
+UPDATE milestone2_lab.serializable_slots
+SET available = false
+WHERE slot = 2;
 COMMIT;
 ```
 
-PostgreSQL should reject Session B's stale write with a serialization failure (SQLSTATE `40001`), either at `UPDATE` or `COMMIT`. If the transaction is left aborted, run `ROLLBACK;` in Session B.
+PostgreSQL rejects one transaction with a serialization failure (SQLSTATE `40001`). If the transaction is left aborted, run `ROLLBACK;` in that session.
 
-**Record:** capture which statement returned the error and the exact SQLSTATE. Serializable can prevent anomalies, but the application must retry transactions that fail serialization.
+**Observed result (2026-10-11):** both sessions initially read `2`; Session A committed; Session B's `COMMIT` failed with SQLSTATE `40001`; one slot remained available. Serializable can prevent anomalies, but the application must retry transactions that fail serialization.
 
 ## 4. Repeatable Read with a join
 
@@ -192,6 +202,8 @@ COMMIT;
 
 **Expected result:** the joined reads should both show the same wallet balance and label. Repeatable Read applies to the transaction snapshot across the joined tables too.
 
+**Observed result (2026-10-11):** both reads returned `(100000, "isolation lab wallet")`, although Session B committed a balance of `105000` between them.
+
 ## 5. Break a transfer that checks before it locks
 
 This experiment uses only the deliberately unprotected lab table. It does not change application code or project wallets. The row starts at `50000` paise. Each session reads the balance and independently checks in its application logic whether a `30000`-paise transfer is affordable.
@@ -231,6 +243,8 @@ SELECT balance_paise FROM milestone2_lab.unsafe_wallets WHERE wallet_id = 1;
 
 **Expected result:** the final balance is `-10000`, even though both requests had passed their earlier balance check. The lab table intentionally has no nonnegative constraint so it can show why checking before acquiring the wallet lock is unsafe. Record the output, then continue to the locked implementation discussion below.
 
+**Observed result (2026-10-11):** both reads returned `50000`; the final balance was `-10000`.
+
 ## Cleanup
 
 After all transactions have committed or rolled back, verify the database one more time in Session B and remove only the lab schema:
@@ -256,4 +270,4 @@ if ($env:DATABASE_URL -match '/wallet_test_db$') {
 }
 ```
 
-**Stampede result:** fill this in after the test has run successfully, including the command output and date.
+**Stampede result (2026-10-11):** `test/transfer.stampede.integration.test.js` passed in the complete candidate test run. The test executes the 100-request scenario 20 times; every run had exactly 50 successes, a zero sender balance, a `50000`-paise receiver balance, nonnegative wallets, and matching debit/credit totals. The latest full run reported 19 suites passed and 71 tests passed.

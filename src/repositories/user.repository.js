@@ -13,11 +13,12 @@ function idempotencyError(message, status, code) {
     return Object.assign(new Error(message), { status, code });
 }
 
-async function createUser({ email, fullName, password, idempotencyKey }) {
+async function createUser({ email, fullName, phone, password, idempotencyKey }) {
     const requestHash = hashRequest({
         operation: 'user-create',
         email,
         fullName,
+        phone,
         password
     });
     const client = await pool.connect();
@@ -66,10 +67,10 @@ async function createUser({ email, fullName, password, idempotencyKey }) {
 
         const passwordHash = await bcrypt.hash(password, 12);
         const userResult = await client.query(
-            `INSERT INTO users (email, full_name, password_hash)
-             VALUES ($1, $2, $3)
-             RETURNING id, email, full_name, status, created_at`,
-            [email, fullName, passwordHash]
+            `INSERT INTO users (email, full_name, phone, kyc_status, password_hash)
+             VALUES ($1, $2, $3, 'pending', $4)
+             RETURNING id, email, full_name, phone, kyc_status, status, created_at`,
+            [email, fullName, phone, passwordHash]
         );
         const user = userResult.rows[0];
         const responseBody = { data: user };

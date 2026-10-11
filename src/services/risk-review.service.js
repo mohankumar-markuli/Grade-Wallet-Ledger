@@ -22,7 +22,7 @@ async function decideHeldTransfer({ transferId, decision, idempotencyKey }) {
         let response;
         if (decision === 'reverse') {
             await client.query("UPDATE transfers SET status='failed' WHERE id=$1", [transfer.id]);
-            await client.query("INSERT INTO transfer_status_audit (transfer_id,old_status,new_status,reason) VALUES ($1,'held','failed','Administrator rejected held transfer')", [transfer.id]);
+            await client.query("INSERT INTO transfer_status_audit (transfer_id,old_status,new_status,reason,actor_type) VALUES ($1,'held','failed','Administrator rejected held transfer','administrator')", [transfer.id]);
             await client.query("UPDATE risk_flags SET status='resolved',review_decision='rejected',decided_at=NOW(),resolved_at=NOW() WHERE transfer_id=$1 AND status IN ('open','reviewing')", [transfer.id]);
             response = { data: { transferId: String(transfer.id), status: 'failed', decision: 'reverse' } };
         } else {
@@ -36,7 +36,7 @@ async function decideHeldTransfer({ transferId, decision, idempotencyKey }) {
             await client.query('UPDATE accounts SET balance_paise=balance_paise-$1::bigint WHERE id=$2', [transfer.amount_paise,source.id]);
             await client.query('UPDATE accounts SET balance_paise=balance_paise+$1::bigint WHERE id=$2', [transfer.amount_paise,destination.id]);
             const updated = await client.query("UPDATE transfers SET status='completed',completed_at=NOW() WHERE id=$1 RETURNING id,status,amount_paise,from_account_id,to_account_id,completed_at", [transfer.id]);
-            await client.query("INSERT INTO transfer_status_audit (transfer_id,old_status,new_status,reason) VALUES ($1,'held','completed','Administrator released held transfer')", [transfer.id]);
+            await client.query("INSERT INTO transfer_status_audit (transfer_id,old_status,new_status,reason,actor_type) VALUES ($1,'held','completed','Administrator released held transfer','administrator')", [transfer.id]);
             await client.query("UPDATE risk_flags SET status='resolved',review_decision='released',decided_at=NOW(),resolved_at=NOW() WHERE transfer_id=$1 AND status IN ('open','reviewing')", [transfer.id]);
             response = { data: { transfer: updated.rows[0], decision: 'release' } };
         }

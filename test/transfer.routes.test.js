@@ -106,7 +106,7 @@ describe('POST /wallets/:id/transfer', () => {
             });
 
         expect(response.status).toBe(400);
-        expect(response.body.error.code).toBe('VALIDATION_ERROR');
+        expect(response.body.code).toBe('VALIDATION_ERROR');
         expect(getWalletBalance).not.toHaveBeenCalled();
         expect(transferBetweenWallets).not.toHaveBeenCalled();
     });
@@ -120,7 +120,7 @@ describe('POST /wallets/:id/transfer', () => {
             });
 
         expect(response.status).toBe(400);
-        expect(response.body.error.code).toBe('VALIDATION_ERROR');
+        expect(response.body.code).toBe('VALIDATION_ERROR');
         expect(transferBetweenWallets).not.toHaveBeenCalled();
     });
 
@@ -145,7 +145,7 @@ describe('POST /wallets/:id/transfer', () => {
             });
 
         expect(response.status).toBe(409);
-        expect(response.body.error.code).toBe('INSUFFICIENT_FUNDS');
+        expect(response.body.code).toBe('INSUFFICIENT_FUNDS');
     });
 
     test('rejects a source wallet that does not belong to the user', async () => {
@@ -161,7 +161,7 @@ describe('POST /wallets/:id/transfer', () => {
             });
 
         expect(response.status).toBe(404);
-        expect(response.body.error.code).toBe('WALLET_NOT_FOUND');
+        expect(response.body.code).toBe('WALLET_NOT_FOUND');
         expect(transferBetweenWallets).not.toHaveBeenCalled();
     });
 

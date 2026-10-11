@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Migrate and test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: wallet_user
+          POSTGRES_PASSWORD: wallet_ci_password
+          POSTGRES_DB: wallet_test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wallet_user -d wallet_test_db"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://wallet_user:wallet_ci_password@localhost:5432/wallet_test_db
+      MIGRATION_EXPECTED_DATABASE: wallet_test_db
+      LLM_PROVIDER: mock
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build schema from an empty test database
+        run: npm run migrate:test
+
+      - name: Run all tests, including 20 stampede repetitions
+        run: npm test -- --runInBand

@@ -59,7 +59,7 @@ describe('manual reconciliation endpoint', () => {
     test('returns the reconciliation report to an authorized caller', async () => {
         const body = { data: { runId: '41', status: 'completed' } };
         runReconciliation.mockResolvedValue({
-            status: 200,
+            status: 202,
             body,
             replayed: false
         });
@@ -70,7 +70,7 @@ describe('manual reconciliation endpoint', () => {
             .set('Idempotency-Key', KEY)
             .send({});
 
-        expect(response.status).toBe(200);
+        expect(response.status).toBe(202);
         expect(response.body).toEqual(body);
         expect(runReconciliation).toHaveBeenCalledWith({
             idempotencyKey: KEY,

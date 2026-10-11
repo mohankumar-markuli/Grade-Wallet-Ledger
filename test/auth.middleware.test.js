@@ -3,8 +3,10 @@ const request = require('supertest');
 const jwt = require('jsonwebtoken');
 
 const authenticateToken = require('../src/middleware/auth.middleware');
+const requestId = require('../src/middleware/request-id.middleware');
 
 const app = express();
+app.use(requestId);
 
 app.get('/protected', authenticateToken, (req, res) => {
     res.status(200).json({
@@ -27,8 +29,9 @@ describe('Authentication middleware', () => {
         const response = await request(app).get('/protected');
 
         expect(response.status).toBe(401);
-        expect(response.body.error).toBe(
-            'Authentication token is required'
+        expect(response.body.code).toBe('AUTHENTICATION_REQUIRED');
+        expect(response.body.message).toBe(
+            'Authentication token is required.'
         );
     });
 
@@ -38,8 +41,9 @@ describe('Authentication middleware', () => {
             .set('Authorization', 'Bearer invalid-token');
 
         expect(response.status).toBe(401);
-        expect(response.body.error).toBe(
-            'Invalid or expired authentication token'
+        expect(response.body.code).toBe('INVALID_AUTHENTICATION');
+        expect(response.body.message).toBe(
+            'Invalid or expired authentication token.'
         );
     });
 

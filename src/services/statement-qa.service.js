@@ -21,9 +21,14 @@ function validateIntent(intent) {
     return intent;
 }
 
-async function answerStatementQuestion({ userId, question, idempotencyKey }) {
+async function answerStatementQuestion({
+    userId,
+    question,
+    idempotencyKey,
+    llmProvider = provider
+}) {
     // The provider receives only the question. It never receives ledger data or SQL.
-    const intent = validateIntent(await provider.parseStatementQuestion({ question }));
+    const intent = validateIntent(await llmProvider.parseStatementQuestion({ question }));
     if (!intent) return persistResponse({ userId, question, idempotencyKey, result: { status: 422, body: { error: {
         code: 'UNSUPPORTED_QUESTION',
         message: 'Ask about total sent, total received, largest transfer, or transfer count for a date range.'
